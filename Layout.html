@@ -224,10 +224,57 @@ input[type="file"] {
   html[data-theme="dark"] .logo-dark{display:block}
 
   @media print {
-    /* Visualização: separar constatação na 1ª página e resposta/conclusão na 2ª */
-    .split{display:block}
-    .panel{break-inside:avoid-page;page-break-inside:avoid}
-    .panel-resposta{break-before:page;page-break-before:always;margin-top:24px}
+    @page { size: landscape; }
+
+    html, body{
+      margin:0 !important;
+      padding:0 !important;
+      height:auto;
+      overflow:visible !important;
+    }
+
+    /* Imprimir somente os blocos CONSTATAÇÃO e RESPOSTA */
+    body *{visibility:hidden}
+    #view-visualizar, #view-visualizar *{visibility:visible}
+    #view-visualizar > :not(.split){display:none !important}
+    #view-visualizar{
+      position:static !important;
+      width:100% !important;
+      max-width:100% !important;
+      border:0 !important;
+      box-shadow:none !important;
+      margin:0 !important;
+      padding:0 !important;
+      font-size:11px;
+      line-height:1.2;
+    }
+    #view-visualizar, #view-visualizar *{box-sizing:border-box}
+
+    /* Visualização: imprimir em 2 colunas na mesma página */
+    #view-visualizar .split{
+      display:grid !important;
+      grid-template-columns:1fr 1fr;
+      gap:8px;
+      align-items:start;
+      margin:0;
+      padding:0;
+      width:100%;
+    }
+    #view-visualizar .panel{
+      break-inside:avoid-page;
+      page-break-inside:avoid;
+      margin:0 !important;
+      padding:6px !important;
+    }
+    #view-visualizar .panel-resposta{
+      break-before:auto;
+      page-break-before:auto;
+      margin-top:0;
+    }
+
+    /* Sem resposta/conclusão: imprime só a CONSTATAÇÃO, mantendo coluna à esquerda */
+    #view-visualizar .split.print-left-only .panel-resposta{display:none !important}
+    #view-visualizar .split.print-left-only .panel-constatacao{grid-column:1 / 2}
   }
 
 
