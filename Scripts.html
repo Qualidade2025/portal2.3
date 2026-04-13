@@ -1320,6 +1320,8 @@ function preencherCamposResponder(rnc, ano, mes){
       document.getElementById('resp_motivo').value = d.motivo || '';
       document.getElementById('resp_disposicao').value = d.disposicao || '';
       document.getElementById('resp_descCorrecao').value = d.descricaoAcaoCorretiva || '';
+      autoResizeTextarea(document.getElementById('resp_descricao'));
+      autoResizeTextarea(document.getElementById('resp_descCorrecao'));
 
       /* ====== Dados de resposta ====== */
       var r = d.resposta || null;
@@ -1564,6 +1566,8 @@ function abrirCorrigir(rnc, ano, mes){
         document.getElementById('descricao').value = d.descricao || '';
         document.getElementById('disposicao').value = d.disposicao || '';
         document.getElementById('descCorrecao').value = d.descricaoAcaoCorretiva || '';
+        autoResizeTextarea(document.getElementById('descricao'));
+        autoResizeTextarea(document.getElementById('descCorrecao'));
 
         google.script.run
           .withSuccessHandler(function(arr){
@@ -1599,7 +1603,7 @@ if (opEl) opEl.addEventListener('input', function(){
   var v = opEl.value.replace(/[^\d/]/g,'').replace(/\/+/g,'/').slice(0,8);
   opEl.value = v;
 });
-['pq1','pq2','pq3','pq4','pq5','descricao','descCorrecao','val_pq1','val_pq2','val_pq3','val_pq4','val_pq5','vis_pq1','vis_pq2','vis_pq3','vis_pq4','vis_pq5'].forEach(function(id){
+['pq1','pq2','pq3','pq4','pq5','descricao','descCorrecao','resp_descricao','resp_descCorrecao','vis_descricao','vis_descCorrecao','val_pq1','val_pq2','val_pq3','val_pq4','val_pq5','vis_pq1','vis_pq2','vis_pq3','vis_pq4','vis_pq5'].forEach(function(id){
   var el = document.getElementById(id);
   if (!el) return;
   el.addEventListener('input', function(){ autoResizeTextarea(el); });
@@ -2382,6 +2386,8 @@ function abrirVisualizar(rnc, ano, mes){
       document.getElementById('vis_motivo').value = d.motivo || '';
       document.getElementById('vis_disposicao').value = d.disposicao || '';
       document.getElementById('vis_descCorrecao').value = d.descricaoAcaoCorretiva || '';
+      autoResizeTextarea(document.getElementById('vis_descricao'));
+      autoResizeTextarea(document.getElementById('vis_descCorrecao'));
 
       // Bloco de resposta (exibe apenas se houver)
       var r = d.resposta || null;
