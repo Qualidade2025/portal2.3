@@ -217,16 +217,17 @@
     backdrop-filter:blur(4px);
     -webkit-backdrop-filter:blur(4px);
   }
-  .filter-dialog{position:relative;background:var(--surface);border-radius:12px;box-shadow:var(--shadow);padding:16px;width:360px;max-height:70vh;overflow:auto;z-index:1;display:flex;flex-direction:column;gap:12px;align-items:flex-start;text-align:left}
+  .filter-dialog{position:relative;background:var(--surface);border-radius:12px;box-shadow:var(--shadow);padding:16px;width:360px;max-height:70vh;overflow-y:auto;overflow-x:hidden;z-index:1;display:flex;flex-direction:column;gap:12px;align-items:flex-start;text-align:left;box-sizing:border-box}
   .filter-header{display:flex;align-items:center;justify-content:center;gap:12px;position:relative;width:100%}
   .filter-title{font-weight:700;font-size:16px;margin:0;flex:1;text-align:center}
   .filter-close{position:absolute;right:0;top:50%;transform:translateY(-50%)}
-  .filter-body{display:flex;flex-direction:column;gap:8px;align-items:flex-start;width:100%;text-align:left}
-  .filter-options{border:1px solid var(--border);border-radius:8px;padding:8px;max-height:240px;overflow:auto;display:flex;flex-direction:column;gap:8px;align-items:stretch;width:100%;text-align:left}
+  .filter-body{display:flex;flex-direction:column;gap:8px;align-items:flex-start;width:100%;text-align:left;box-sizing:border-box}
+  .filter-options{border:1px solid var(--border);border-radius:8px;padding:8px;max-height:240px;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;align-items:stretch;width:100%;text-align:left;box-sizing:border-box}
   .filter-option{display:grid;grid-template-columns:auto 1fr;align-items:flex-start;justify-items:flex-start;gap:8px;font-size:13px;width:100%;text-align:left}
   .filter-option input[type="checkbox"]{margin:2px 4px 0 0;justify-self:start}
   .filter-option-label{padding-left:2px;flex:1;text-align:left;justify-self:start}
-  .filter-actions{display:flex;justify-content:flex-end;gap:8px;width:100%}
+  .filter-actions{display:flex;justify-content:flex-end;gap:8px;width:100%;box-sizing:border-box}
+  .filter-dialog :is(input,select,textarea){box-sizing:border-box}
 
   .modal{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;z-index:9999}
   .modal.hidden{display:none !important}
