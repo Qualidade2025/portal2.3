@@ -207,7 +207,16 @@
   /* Modal de filtros estilo Excel */
   .filter-overlay{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;z-index:10000}
   .filter-overlay.hidden{display:none !important}
-  .filter-backdrop{position:absolute;top:0;left:0;right:0;bottom:0;background:var(--overlay)}
+  .filter-backdrop{
+    position:absolute;
+    top:0;
+    left:0;
+    right:0;
+    bottom:0;
+    background:var(--overlay);
+    backdrop-filter:blur(4px);
+    -webkit-backdrop-filter:blur(4px);
+  }
   .filter-dialog{position:relative;background:var(--surface);border-radius:12px;box-shadow:var(--shadow);padding:16px;width:360px;max-height:70vh;overflow:auto;z-index:1;display:flex;flex-direction:column;gap:12px;align-items:flex-start;text-align:left}
   .filter-header{display:flex;align-items:center;justify-content:center;gap:12px;position:relative;width:100%}
   .filter-title{font-weight:700;font-size:16px;margin:0;flex:1;text-align:center}
@@ -221,7 +230,16 @@
 
   .modal{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;z-index:9999}
   .modal.hidden{display:none !important}
-  .modal-backdrop{position:absolute;top:0;left:0;right:0;bottom:0;background:var(--overlay)}
+  .modal-backdrop{
+    position:absolute;
+    top:0;
+    left:0;
+    right:0;
+    bottom:0;
+    background:var(--overlay);
+    backdrop-filter:blur(4px);
+    -webkit-backdrop-filter:blur(4px);
+  }
   .modal-dialog{position:relative;background:var(--surface);border-radius:12px;box-shadow:var(--shadow);padding:16px;width:90%;max-width:900px;max-height:90vh;overflow:auto;z-index:1}
   .modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
   .modal-body{min-height:300px}
@@ -259,6 +277,8 @@ input[type="file"] {
       padding:0 !important;
       height:auto;
       overflow:visible !important;
+      background:#fff !important;
+      color-scheme:light !important;
     }
 
     /* Imprimir somente os blocos CONSTATAÇÃO e RESPOSTA */
@@ -275,8 +295,23 @@ input[type="file"] {
       padding:0 !important;
       font-size:11px;
       line-height:1.2;
+      color:#000 !important;
+      -webkit-print-color-adjust:exact;
+      print-color-adjust:exact;
+      background:#fff !important;
     }
     #view-visualizar, #view-visualizar *{box-sizing:border-box}
+    #view-visualizar :is(h1,h2,h3,h4,h5,h6,label,small,p,span,div,input,textarea,button){
+      color:#000 !important;
+      -webkit-text-fill-color:#000 !important;
+    }
+    #view-visualizar .muted{
+      color:#000 !important;
+    }
+    #view-visualizar :is(.panel,input,textarea,select){
+      border-color:#9ca3af !important;
+      background:#fff !important;
+    }
 
     /* Visualização: imprimir em 2 colunas na mesma página */
     #view-visualizar .split{
