@@ -691,15 +691,17 @@ function autoResizeWithin(container){
 }
 
 function autoResizePrintFields(){
-  [
+  var fixedIds = [
     'vis_descricao',
     'vis_descCorrecao',
+    'vis_motivoImprocedente',
     'vis_pq1',
     'vis_pq2',
     'vis_pq3',
     'vis_pq4',
     'vis_pq5'
-  ].forEach(function(id){
+  ];
+  fixedIds.forEach(function(id){
     var el = document.getElementById(id);
     if (!el) return;
     el.style.overflowY = 'hidden';
@@ -707,6 +709,18 @@ function autoResizePrintFields(){
     el.style.height = 'auto';
     el.style.height = el.scrollHeight + 'px';
   });
+
+  var viewVisualizar = document.getElementById('view-visualizar');
+  if (!viewVisualizar) return;
+  Array.prototype.forEach.call(
+    viewVisualizar.querySelectorAll('#vis_solucoesList textarea.autoresize'),
+    function(el){
+      el.style.overflowY = 'hidden';
+      el.style.resize = 'none';
+      el.style.height = 'auto';
+      el.style.height = el.scrollHeight + 'px';
+    }
+  );
 }
 
 function prepareAndPrintVisualizar(){
