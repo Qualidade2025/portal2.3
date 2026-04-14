@@ -271,7 +271,11 @@ input[type="file"] {
   html[data-theme="dark"] .logo-dark{display:block}
 
   @media print {
-    @page { size: landscape; }
+    @page {
+      size: landscape;
+      /* Menor margem vertical, preservando as laterais */
+      margin: 9mm 9mm 9mm;
+    }
 
     html, body{
       margin:0 !important;
