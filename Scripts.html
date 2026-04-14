@@ -690,6 +690,40 @@ function autoResizeWithin(container){
   });
 }
 
+function autoResizePrintFields(){
+  [
+    'vis_descricao',
+    'vis_descCorrecao',
+    'vis_pq1',
+    'vis_pq2',
+    'vis_pq3',
+    'vis_pq4',
+    'vis_pq5'
+  ].forEach(function(id){
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.style.overflowY = 'hidden';
+    el.style.resize = 'none';
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 'px';
+  });
+}
+
+function prepareAndPrintVisualizar(){
+  var viewVisualizar = document.getElementById('view-visualizar');
+  if (!viewVisualizar) {
+    window.print();
+    return;
+  }
+  viewVisualizar.classList.add('is-printing');
+  requestAnimationFrame(function(){
+    requestAnimationFrame(function(){
+      autoResizePrintFields();
+      window.print();
+    });
+  });
+}
+
 /* ================== Bindings iniciais ================== */
 document.getElementById('btnEntrar').onclick = doLogin;
 document.getElementById('btnCriar').onclick  = function(){ abrirCriar(true); };
@@ -712,7 +746,21 @@ document.getElementById('btnEnviar').onclick = enviarCriar;
 
 document.getElementById('btnRespVoltar').onclick = function(){ hide('view-responder'); show('view-home'); carregarTabelas(); };
 document.getElementById('btnVisVoltar').onclick  = function(){ hide('view-visualizar'); show('view-home'); carregarTabelas(); };
-document.getElementById('btnVisImprimir').onclick = function(){ window.print(); };
+document.getElementById('btnVisImprimir').onclick = prepareAndPrintVisualizar;
+
+window.addEventListener('beforeprint', function(){
+  var viewVisualizar = document.getElementById('view-visualizar');
+  if (!viewVisualizar) return;
+  viewVisualizar.classList.add('is-printing');
+  autoResizePrintFields();
+});
+
+window.addEventListener('afterprint', function(){
+  var viewVisualizar = document.getElementById('view-visualizar');
+  if (!viewVisualizar) return;
+  viewVisualizar.classList.remove('is-printing');
+  autoResizeWithin(viewVisualizar);
+});
 
 // NOVO: botão Atualizar na home (sem dar refresh do navegador)
 var _btnAtualizar = document.getElementById('btnAtualizar');
