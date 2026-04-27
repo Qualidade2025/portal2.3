@@ -21,17 +21,61 @@ function testePermissoesDrive() {
 
 function _getBaseFolderFromDados_() {
   var valInfo = _getKeyOnDados_('PastaBaseDriveId') || _getKeyOnDados_('PastaBaseDrive');
-  var raw = valInfo && String(valInfo.value || '').trim();
-  if (!raw) return null;
-  var id = _extractDriveId_(raw);
-  if (!id) return null;
-  return DriveApp.getFolderById(id);
+  if (!valInfo) return null;
+
+  var sh = SpreadsheetApp.getActive().getSheetByName('Dados');
+  if (!sh) return null;
+
+  return _resolveFolderFromDadosCell_(sh, valInfo.row, valInfo.col);
 }
 
 function _extractDriveId_(text) {
   if (!text) return '';
   var m = String(text).match(/[-\w]{25,}/);
   return m ? m[0] : '';
+}
+
+function _resolveFolderFromDadosCell_(sheet, row, col) {
+  if (!sheet || !row || !col) return null;
+
+  var cell = sheet.getRange(row, col);
+  var value = String(cell.getValue() || '').trim();
+  var candidates = [];
+
+  if (value) candidates.push(value);
+
+  // Suporte para hyperlink "embutido" (texto com URL)
+  var rich = cell.getRichTextValue && cell.getRichTextValue();
+  var richUrl = rich && rich.getLinkUrl ? rich.getLinkUrl() : '';
+  if (richUrl) candidates.push(String(richUrl).trim());
+
+  // Suporte para fórmula HYPERLINK("url","texto")
+  var formula = String(cell.getFormula() || '').trim();
+  if (formula) {
+    var m = formula.match(/HYPERLINK\s*\(\s*"([^"]+)"/i);
+    if (m && m[1]) candidates.push(String(m[1]).trim());
+  }
+
+  // 1) Tenta resolver por ID/URL
+  for (var i = 0; i < candidates.length; i++) {
+    var id = _extractDriveId_(candidates[i]);
+    if (!id) continue;
+    try {
+      return DriveApp.getFolderById(id);
+    } catch (_) {}
+  }
+
+  // 2) Fallback: nome da pasta no Meu Drive
+  for (var j = 0; j < candidates.length; j++) {
+    var name = String(candidates[j] || '').trim();
+    if (!name) continue;
+    try {
+      var it = DriveApp.getFoldersByName(name);
+      if (it.hasNext()) return it.next();
+    } catch (_) {}
+  }
+
+  return null;
 }
 
 function _getRncFolderIndex_(baseFolder) {
