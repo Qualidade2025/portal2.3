@@ -1864,9 +1864,6 @@ async function enviarCriar(){
           }
         }
         if (res.driveError)     html += '<br><span style="color:#b91c1c">⚠ Drive: ' + res.driveError + '</span>';
-        if (res.driveDebug && res.driveDebug.length){
-          html += '<details style="margin-top:6px"><summary>Debug Drive JSON</summary><pre style="white-space:pre-wrap;word-break:break-word;margin:6px 0 0">' + esc(res.driveDebug.join('\n')) + '</pre></details>';
-        }
         document.getElementById('msgCriar').innerHTML = html;
 
         clearCriarForm();
