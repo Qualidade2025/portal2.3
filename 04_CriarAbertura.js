@@ -65,6 +65,7 @@ function criarRNC_SalvarBasico(token, pv, op, clienteLivre, origem, fornecedor, 
 
     // ===== DRIVE =====
     var driveError = '';
+    var driveDebug = [];
     var fileUrl = '', monthFolderUrl = '';
 
     try {
@@ -85,10 +86,12 @@ function criarRNC_SalvarBasico(token, pv, op, clienteLivre, origem, fornecedor, 
         usuarioAbertura: sess.usuario || ''
       });
       if (driveJson && driveJson.error) driveError = String(driveJson.error);
+      if (driveJson && Array.isArray(driveJson.debug)) driveDebug = driveDebug.concat(driveJson.debug);
       fileUrl = (driveJson && driveJson.fileUrl) || '';
       monthFolderUrl = (driveJson && driveJson.monthFolderUrl) || (driveJson && driveJson.monthFolder && driveJson.monthFolder.getUrl()) || '';
     } catch(e) {
       driveError = 'JSON: ' + String(e);
+      driveDebug.push('[JSON-RNC ' + rncId + '] Exceção em criarRNC_SalvarBasico: ' + String(e));
     }
 
     var attachRes = { items: [] };
@@ -108,6 +111,7 @@ function criarRNC_SalvarBasico(token, pv, op, clienteLivre, origem, fornecedor, 
       fileUrl: fileUrl,
       monthFolderUrl: monthFolderUrl,
       driveError: driveError,
+      driveDebug: driveDebug,
       anexos: (attachRes && attachRes.items) ? attachRes.items : []
     };
   } catch (e) {
