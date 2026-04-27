@@ -1,0 +1,138 @@
+<!-- VISUALIZAR -->
+<div id="view-visualizar" class="card hidden">
+  <div class="header-3col">
+    <div class="left"><button class="btn-grey" id="btnVisVoltar">← Voltar</button></div>
+    <h1>Visualizar RNC</h1>
+    <div style="text-align:right"><button class="btn" id="btnVisImprimir">Imprimir</button></div>
+  </div>
+
+  <div class="split">
+    <!-- Esquerda: CONSTATAÇÃO + CORREÇÃO -->
+    <div class="panel panel-constatacao" style="margin-top:0">
+      <h2 style="margin-top:0">CONSTATAÇÃO</h2>
+
+      <!-- Evidências de abertura -->
+      <div style="margin:8px 0 12px">
+        <label>Evidências de abertura</label>
+        <div id="vis_aberturaAnexos" class="muted">—</div>
+      </div>
+
+      <div class="row">
+        <div class="col-6">
+          <label>RNC</label>
+          <input id="vis_rnc" readonly>
+        </div>
+        <div class="col-6">
+          <label>Data de abertura</label>
+          <input id="vis_dataAbertura" readonly>
+        </div>
+
+        <div class="col-6">
+          <label>PV</label>
+          <input id="vis_pv" readonly>
+        </div>
+        <div class="col-6">
+          <label>OP</label>
+          <input id="vis_op" readonly>
+        </div>
+
+        <div class="col-4">
+          <label>Origem</label>
+          <input id="vis_origem" readonly>
+        </div>
+        <div class="col-4">
+          <label>Fornecedor</label>
+          <input id="vis_fornecedor" readonly>
+        </div>
+        <div class="col-4">
+          <label>Responsável (constatação)</label>
+          <input id="vis_responsavel" readonly>
+        </div>
+
+        <div class="col-12">
+          <label>Motivo</label>
+          <input id="vis_motivo" readonly>
+        </div>
+
+        <div class="col-12">
+          <label>Descrição da NC</label>
+          <textarea id="vis_descricao" class="autoresize" rows="2" readonly></textarea>
+        </div>
+      </div>
+
+      <h2>CORREÇÃO</h2>
+      <div class="row">
+        <div class="col-6">
+          <label>Disposição (ação imediata)</label>
+          <input id="vis_disposicao" readonly>
+        </div>
+        <div class="col-12">
+          <label>Descrição da ação corretiva</label>
+          <textarea id="vis_descCorrecao" class="autoresize" rows="2" readonly></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- Direita: RESPOSTA -->
+    <div class="panel panel-resposta" style="margin-top:0">
+      <h2 style="margin:0">RESPOSTA</h2>
+
+      <!-- Aviso quando não houver resposta -->
+      <div id="visRespEmpty" class="muted hidden" style="margin:8px 0">Sem resposta</div>
+
+      <!-- Corpo da resposta -->
+      <div id="visRespBody">
+        <!-- Evidências (resposta e conclusão) -->
+        <div style="margin:8px 0 8px">
+          <label id="vis_respAnexosRespostaLabel">Evidências de resposta</label>
+          <div id="vis_respAnexosResposta" class="muted">—</div>
+        </div>
+        <div id="vis_respAnexosConclusaoBox" style="margin:0 0 12px">
+          <label id="vis_respAnexosConclusaoLabel">Evidências de conclusão</label>
+          <div id="vis_respAnexosConclusao" class="muted">—</div>
+        </div>
+
+        <div class="row">
+          <div class="col-6">
+            <label>Data de resposta</label>
+            <input id="vis_dataResposta" readonly>
+          </div>
+        </div>
+
+      <div id="vis_causaRaizSection">
+          <h3 style="margin:12px 0 6px">ANÁLISE DE CAUSA RAIZ</h3>
+          <div class="stack-why">
+            <div class="inline-field"><label>1º Porquê</label><textarea id="vis_pq1" class="autoresize" rows="1" readonly></textarea></div>
+            <div class="inline-field"><label>2º Porquê</label><textarea id="vis_pq2" class="autoresize" rows="1" readonly></textarea></div>
+            <div class="inline-field"><label>3º Porquê</label><textarea id="vis_pq3" class="autoresize" rows="1" readonly></textarea></div>
+            <div class="inline-field"><label>4º Porquê</label><textarea id="vis_pq4" class="autoresize" rows="1" readonly></textarea></div>
+            <div class="inline-field"><label>5º Porquê</label><textarea id="vis_pq5" class="autoresize" rows="1" readonly></textarea></div>
+          </div>
+        </div>
+
+        <h3 id="vis_solucoesTitle" style="margin:12px 0 6px">SOLUÇÃO</h3>
+        <div id="vis_solucoesList"></div>
+        <div id="vis_improcedenteBox" class="hidden" style="margin-top:10px">
+          <label>Motivo da improcedência</label>
+          <textarea id="vis_motivoImprocedente" class="autoresize" rows="2" readonly></textarea>
+        </div>
+      </div>
+
+      <!-- (opcional) Ações de validação da resposta para a Qualidade -->
+      <div id="respValBox" class="hidden" style="margin-top:12px">
+        <button class="btn" id="btnValidarResp">Validar Resposta</button>
+        <button class="btn-grey" id="btnRetornarResp" style="margin-left:8px">Retornar Resposta</button>
+
+        <div id="retRespBox" class="hidden" style="margin-top:10px">
+          <label>Motivo do retorno (resposta)</label>
+          <textarea id="retMotivoResp" placeholder="Descreva o motivo da devolução da resposta."></textarea>
+          <div>
+            <button class="btn" id="btnEnviarRetornoResp">Enviar retorno</button>
+          </div>
+        </div>
+
+        <div id="qualidadeMsgResp" class="muted" style="margin-top:8px"></div>
+      </div>
+    </div>
+  </div>
+</div>
