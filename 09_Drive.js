@@ -298,6 +298,13 @@ function _ensureRncFolderAndJsonCreated_(rncFolder, rncId, jsonFile) {
   }
 }
 
+function _formatDriveError_(e) {
+  if (!e) return 'Erro desconhecido';
+  var msg = (e && e.message) ? String(e.message) : String(e);
+  var stack = (e && e.stack) ? String(e.stack) : '';
+  return stack ? (msg + ' | stack: ' + stack) : msg;
+}
+
 function _listarAnexosDaRnc_(rncFolder, rncId, monthFolder) {
   var anexos = [];
   var folder = rncFolder || monthFolder;
@@ -315,27 +322,66 @@ function _listarAnexosDaRnc_(rncFolder, rncId, monthFolder) {
 }
 
 function _saveRncJsonToDrive_(rncId, payloadObj) {
+  var debug = [];
+  function dbg(msg) {
+    var line = '[JSON-RNC ' + String(rncId || '') + '] ' + String(msg || '');
+    debug.push(line);
+    try { Logger.log(line); } catch (_) {}
+  }
+
   try {
+    rncId = String(rncId || '').trim();
+    if (!rncId) throw new Error('RNC inválida para salvar JSON.');
+
+    var baseFolder = _getBaseFolderFromDados_();
+    if (!baseFolder) throw new Error('Pasta base do Drive não encontrada na aba Dados.');
+    dbg('Base folder OK: ' + baseFolder.getId());
+
     var mFolder = _ensureYearMonthFolder_();
+    if (!mFolder) throw new Error('Pasta do mês não encontrada/criada.');
+    dbg('Mês OK: ' + mFolder.getName() + ' (' + mFolder.getId() + ')');
+
     var rncFolder = _ensureRncFolderInMonth_(mFolder, rncId);
     if (!rncFolder) throw new Error('Falha ao criar/obter pasta da RNC: ' + rncId);
+    dbg('Pasta RNC OK: ' + rncFolder.getName() + ' (' + rncFolder.getId() + ')');
 
     var content = JSON.stringify(payloadObj, null, 2);
-    var fileIt = rncFolder.getFilesByName(rncId + '.json');
+    dbg('Payload serializado. Tamanho=' + content.length + ' chars');
+
+    var expectedName = rncId + '.json';
+    dbg('Nome esperado do JSON: ' + expectedName);
+    var fileIt = rncFolder.getFilesByName(expectedName);
     var file;
     if (fileIt.hasNext()) {
       file = fileIt.next();
       file.setContent(content);
+      dbg('JSON existente atualizado. FileId=' + file.getId());
     } else {
-      file = rncFolder.createFile(rncId + '.json', content, MimeType.PLAIN_TEXT);
+      var blob = Utilities.newBlob(content, 'application/json', expectedName);
+      file = rncFolder.createFile(blob);
+      dbg('JSON criado por Blob. FileId=' + file.getId());
     }
 
     _ensureRncFolderAndJsonCreated_(rncFolder, rncId, file);
-    _registerRncFolders_(_getBaseFolderFromDados_(), rncId, mFolder, rncFolder);
-    _registerRncJsonInIndex_(_getBaseFolderFromDados_(), rncId, file);
-    return { fileUrl: file.getUrl(), monthFolder: mFolder, monthFolderUrl: mFolder.getUrl(), rncFolder: rncFolder, rncFolderUrl: rncFolder.getUrl() };
+    dbg('Validação final de existência do JSON concluída.');
+
+    _registerRncFolders_(baseFolder, rncId, mFolder, rncFolder);
+    _registerRncJsonInIndex_(baseFolder, rncId, file);
+    dbg('Índice atualizado com jsonrncid=' + file.getId());
+
+    return {
+      fileUrl: file.getUrl(),
+      fileId: file.getId(),
+      monthFolder: mFolder,
+      monthFolderUrl: mFolder.getUrl(),
+      rncFolder: rncFolder,
+      rncFolderUrl: rncFolder.getUrl(),
+      debug: debug
+    };
   } catch (e) {
-    return { error: String(e) };
+    var err = _formatDriveError_(e);
+    dbg('ERRO: ' + err);
+    return { error: err, debug: debug };e
   }
 }
 
