@@ -11,13 +11,13 @@
     </div>
     <div class="home-actions">
       <div class="home-actions-row">
-        <button class="btn" id="btnCriar">Criar RNC</button>
         <!-- NOVO: botão Atualizar (recarrega as tabelas sem derrubar a sessão) -->
-        <button class="btn-grey" id="btnAtualizar" style="margin-left:8px">Atualizar</button>
-        <button class="btn-grey" id="btnInstrucoes" style="margin-left:8px">Instruções</button>
-        <button class="btn-grey" id="btnSair" style="margin-left:8px">Sair</button>
-        <button class="btn-grey theme-toggle" id="btnTema" data-theme-toggle="1" style="margin-left:8px"><span class="theme-toggle-icon" aria-hidden="true">🌙</span></button>
+        <button class="btn-grey home-icon-btn" id="btnAtualizar" title="Atualizar" aria-label="Atualizar">↻</button>
+        <button class="btn-grey home-icon-btn" id="btnInstrucoes" title="Instruções" aria-label="Instruções">i</button>
+        <button class="btn-grey home-icon-btn" id="btnSair" title="Sair" aria-label="Sair">⎋</button>
+        <button class="btn-grey theme-toggle home-icon-btn home-theme-btn" id="btnTema" data-theme-toggle="1" title="Modo claro/escuro" aria-label="Modo claro/escuro"><span class="theme-toggle-icon" aria-hidden="true">◐</span></button>
       </div>
+      <button class="btn home-icon-btn home-add-btn" id="btnCriar" title="Criar RNC" aria-label="Criar RNC">+</button>
       <div id="logoutMsg" class="muted" style="margin-top:6px;text-align:right"></div>
     </div>
   </div>
