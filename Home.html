@@ -37,7 +37,6 @@
       
       </div>
       <button class="btn home-icon-btn home-add-btn" id="btnCriar" title="Criar RNC" aria-label="Criar RNC">+</button>
-      <div id="logoutMsg" class="muted" style="margin-top:6px;text-align:right"></div>
     </div>
   </div>
 
@@ -75,6 +74,12 @@
         </thead>
         <tbody id="devTblBody"></tbody>
       </table>
+    </div>
+    <div id="logoutLoadingModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="logout-loading-dialog" role="status" aria-live="polite" aria-label="Encerrando sessão">
+        <div class="logout-spinner" aria-hidden="true"></div>
+      </div>
     </div>
   </div>
 
