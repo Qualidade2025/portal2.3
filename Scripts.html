@@ -857,7 +857,6 @@ function doLogin(){
       if (helloEl) helloEl.textContent = 'Olá, ' + (PROFILE.nome || PROFILE.usuario) + '!';
       var helloSub = document.getElementById('helloSub');
       if (helloSub) helloSub.innerHTML = 'Bem-vindo ao Portal RNCs' + (areaInfo ? '<br>Setor: ' + areaInfo : '');
-      document.getElementById('logoutMsg').textContent = '';
       applyHomeBlockOrderForProfile();
       hide('view-login'); show('view-home'); setMsg('');
       carregarTabelas();
@@ -865,15 +864,22 @@ function doLogin(){
     .login(u, p);
 }
 function doLogout(){
-  document.getElementById('logoutMsg').textContent = 'Realizando log off...';
-  google.script.run.withSuccessHandler(function(){
-    TOKEN=null; PROFILE=null; sairDeEdicao();
-    applyHomeBlockOrderForProfile();
-    document.getElementById('inUser').value=''; document.getElementById('inPass').value='';
-    hide('view-home'); hide('view-criar'); hide('view-responder'); hide('view-visualizar'); show('view-login');
-    document.getElementById('logoutMsg').textContent = '';
-    setMsg('Sessão encerrada.');
-  }).logout(TOKEN);
+  var loadingModal = document.getElementById('logoutLoadingModal');
+  if (loadingModal) loadingModal.classList.remove('hidden');
+  google.script.run
+    .withFailureHandler(function(err){
+      if (loadingModal) loadingModal.classList.add('hidden');
+      setMsg(err && err.message ? err.message : String(err), true);
+    })
+    .withSuccessHandler(function(){
+      if (loadingModal) loadingModal.classList.add('hidden');
+      TOKEN=null; PROFILE=null; sairDeEdicao();
+      applyHomeBlockOrderForProfile();
+      document.getElementById('inUser').value=''; document.getElementById('inPass').value='';
+      hide('view-home'); hide('view-criar'); hide('view-responder'); hide('view-visualizar'); show('view-login');
+      setMsg('');
+    })
+    .logout(TOKEN);
 }
 
 /* ================== HOME: carregar os 2 paineis ================== */
