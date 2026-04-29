@@ -864,15 +864,14 @@ function doLogin(){
     .login(u, p);
 }
 function doLogout(){
-  var loadingModal = document.getElementById('logoutLoadingModal');
-  if (loadingModal) loadingModal.classList.remove('hidden');
+beginGlobalLoading();
   google.script.run
     .withFailureHandler(function(err){
-      if (loadingModal) loadingModal.classList.add('hidden');
+      endGlobalLoading();
       setMsg(err && err.message ? err.message : String(err), true);
     })
     .withSuccessHandler(function(){
-      if (loadingModal) loadingModal.classList.add('hidden');
+      endGlobalLoading();
       TOKEN=null; PROFILE=null; sairDeEdicao();
       applyHomeBlockOrderForProfile();
       document.getElementById('inUser').value=''; document.getElementById('inPass').value='';
@@ -880,6 +879,37 @@ function doLogout(){
       setMsg('');
     })
     .logout(TOKEN);
+}
+
+var GLOBAL_LOADING_COUNT = 0;
+function getGlobalLoadingModal(){
+  var modal = document.getElementById('globalLoadingModal');
+  if (modal) return modal;
+
+  var source = document.getElementById('logoutLoadingModal');
+  if (source && document.body){
+    modal = source.cloneNode(true);
+    modal.id = 'globalLoadingModal';
+    modal.classList.add('hidden');
+    modal.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(modal);
+    return modal;
+  }
+
+  return source || null;
+}
+
+function beginGlobalLoading(){
+  GLOBAL_LOADING_COUNT += 1;
+  var loadingModal = getGlobalLoadingModal();
+  if (loadingModal) loadingModal.classList.remove('hidden');
+}
+
+function endGlobalLoading(){
+  GLOBAL_LOADING_COUNT = Math.max(0, GLOBAL_LOADING_COUNT - 1);
+  if (GLOBAL_LOADING_COUNT > 0) return;
+  var loadingModal = getGlobalLoadingModal();
+  if (loadingModal) loadingModal.classList.add('hidden');
 }
 
 /* ================== HOME: carregar os 2 paineis ================== */
@@ -1370,6 +1400,7 @@ function abrirValidar(rnc, ano, mes, mode){
 }
 
 function preencherCamposResponder(rnc, ano, mes){
+  beginGlobalLoading();
   ['resp_rnc','resp_pv','resp_op','resp_origem','resp_fornecedor','resp_responsavel','resp_descricao','resp_motivo','resp_disposicao','resp_descCorrecao','resp_dataAbertura'].forEach(function(id){
     var el = document.getElementById(id);
     if (!el) return;
@@ -1378,10 +1409,12 @@ function preencherCamposResponder(rnc, ano, mes){
 
   google.script.run
     .withFailureHandler(function(err){
+      endGlobalLoading();
       var qp = document.getElementById('qualidadeMsg') || document.getElementById('respMsg');
       if (qp) qp.textContent = (err && err.message) ? err.message : String(err);
     })
     .withSuccessHandler(function(res){
+      endGlobalLoading();
       var d = res && res.dados ? res.dados : {};
       var anex = Array.isArray(res.anexos) ? res.anexos : [];
 
@@ -1612,6 +1645,7 @@ setTimeout(function(){
 
 
 function abrirCorrigir(rnc, ano, mes){
+  beginGlobalLoading();
   EDIT_MODE = true; EDIT_RNC_ID = rnc; DEV_MODE = 'abertura';
   document.getElementById('tituloCriar').textContent = 'Corrigir RNC';
   document.getElementById('btnEnviar').textContent = 'Reenviar';
@@ -1621,6 +1655,10 @@ function abrirCorrigir(rnc, ano, mes){
   function ensureFornecedores(callback){
     if (FORNECEDORES_CARREGADOS) return callback();
     google.script.run
+      .withFailureHandler(function(err){
+        endGlobalLoading();
+        document.getElementById('msgCriar').textContent = (err && err.message) ? err.message : String(err);
+      })
       .withSuccessHandler(function(arr){
         fillSelect(document.getElementById('fornecedor'), arr, true);
         document.getElementById('fornecedor').onchange = function(){ carregarMotivos(document.getElementById('fornecedor').value); };
@@ -1633,9 +1671,11 @@ function abrirCorrigir(rnc, ano, mes){
   ensureFornecedores(function(){
     google.script.run
       .withFailureHandler(function(err){
+        endGlobalLoading();
         document.getElementById('msgCriar').textContent = (err && err.message) ? err.message : String(err);
       })
       .withSuccessHandler(function(res){
+        endGlobalLoading();
         var d = res && res.dados ? res.dados : {};
         var anex = Array.isArray(res.anexos) ? res.anexos : [];
 
@@ -2429,6 +2469,7 @@ if (btnConfirmarSelecaoConclusao) btnConfirmarSelecaoConclusao.onclick = confirm
 
 /* ================== VISUALIZAR ================== */
 function abrirVisualizar(rnc, ano, mes){
+  beginGlobalLoading();
   hide('view-home'); hide('view-criar'); hide('view-responder'); show('view-visualizar');
   var splitEl = document.querySelector('#view-visualizar .split');
   if (splitEl) splitEl.classList.add('print-left-only');
@@ -2455,10 +2496,12 @@ function abrirVisualizar(rnc, ano, mes){
   
   google.script.run
     .withFailureHandler(function(err){
+      endGlobalLoading();
       var ax = document.getElementById('vis_aberturaAnexos');
       if (ax) ax.textContent = (err && err.message) ? err.message : String(err);
     })
     .withSuccessHandler(function(res){
+      endGlobalLoading();
       var d = res && res.dados ? res.dados : {};
       var anex = Array.isArray(res.anexos) ? res.anexos : [];
 
