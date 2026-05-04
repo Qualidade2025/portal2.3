@@ -1,0 +1,2679 @@
+<script>
+/* ================== Estado global ================== */
+var TOKEN = null, PROFILE = null, FORNECEDORES_CARREGADOS = false;
+var EDIT_MODE = false, EDIT_RNC_ID = null;
+var RESP_MODE = 'responder';
+var DEV_MODE = null;
+var ANEXOS_ABERTURA = [], ANEXOS_RESPOSTA = [], ANEXOS_CONCLUSAO = [], ANEXOS_IMPROCEDENTE = [];
+var LAST_DEV_ROWS = [], LAST_PEND_ROWS = [], LAST_ALL_ROWS = [], LAST_RNC_ROWS = [];
+var CURRENT_RESPOSTA = null, CURRENT_VALIDACAO_CONCLUSAO = null;
+var selecionarConclusaoResolver = null;
+var THEME_KEY = 'portal-theme';
+
+function getSystemTheme(){
+  return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+}
+
+function getStoredTheme(){
+  try {
+    var saved = localStorage.getItem(THEME_KEY);
+    return (saved === 'dark' || saved === 'light') ? saved : null;
+  } catch (e){
+    return null;
+  }
+}
+
+function applyTheme(theme, options){
+  var next = (theme === 'dark') ? 'dark' : 'light';
+  var opts = options || {};
+  document.documentElement.setAttribute('data-theme', next);
+  if (!opts.skipPersist){
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+  }
+  updateThemeButtonLabel(next);
+  if (!opts.silent){
+    document.dispatchEvent(new CustomEvent('portal-theme-change', { detail: { theme: next } }));
+  }
+}
+
+function updateThemeButtonLabel(theme){
+  var buttons = document.querySelectorAll('[data-theme-toggle]');
+  if (!buttons || !buttons.length) return;
+  var isDark = theme === 'dark';
+  Array.prototype.forEach.call(buttons, function(btn){
+    var icon = btn.querySelector('.theme-toggle-icon');
+    if (!icon){
+      icon = document.createElement('span');
+      icon.className = 'theme-toggle-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      btn.textContent = '';
+      btn.appendChild(icon);
+    }
+    icon.textContent = isDark ? '◑' : '◐';
+    btn.setAttribute('aria-label', isDark ? 'Ativar modo claro' : 'Ativar modo escuro');
+    btn.setAttribute('title', isDark ? 'Ativar modo claro' : 'Ativar modo escuro');
+  });
+}
+
+function initTheme(){
+  var stored = getStoredTheme();
+  applyTheme(stored || getSystemTheme(), { skipPersist: !stored, silent: true });
+}
+
+function toggleTheme(){
+  var current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  applyTheme(current === 'dark' ? 'light' : 'dark');
+}
+
+/* ================== Helpers básicos ================== */
+function show(id){ document.getElementById(id).classList.remove('hidden'); }
+function hide(id){ document.getElementById(id).classList.add('hidden'); }
+function setMsg(text, isErr){
+  var el = document.getElementById('msg');
+  el.textContent = text || '';
+  el.className = isErr ? 'err' : 'muted';
+}
+function fillSelect(sel, arr, includePlaceholder){
+  sel.innerHTML = '';
+  if (includePlaceholder){
+    var p = document.createElement('option');
+    p.value = ''; p.textContent = '— selecione —';
+    sel.appendChild(p);
+  }
+  (arr||[]).forEach(function(v){
+    var opt = document.createElement('option');
+    opt.value = v; opt.textContent = v;
+    sel.appendChild(opt);
+  });
+}
+function esc(t){ return (t==null?'':String(t)).replace(/[&<>"']/g, s=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[s])); }
+function hojeBR(){
+  var d = new Date();
+  var dd = String(d.getDate()).padStart(2,'0');
+  var mm = String(d.getMonth()+1).padStart(2,'0');
+  var yyyy = d.getFullYear();
+  return dd+'/'+mm+'/'+yyyy;
+}
+function fmtDateOnly(dIso){
+  if (!dIso) return '';
+  var dt = (dIso instanceof Date) ? dIso : new Date(dIso);
+  if (Object.prototype.toString.call(dt) === '[object Date]' && !isNaN(dt)){
+    var dd = String(dt.getDate()).padStart(2,'0');
+    var mm = String(dt.getMonth()+1).padStart(2,'0');
+    var yyyy = dt.getFullYear();
+    return dd+'/'+mm+'/'+yyyy;
+  }
+  return '';
+}
+
+function normalizeAreaName(area){
+  return String(area || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+function isUserQualidade(){
+  var areas = (PROFILE && PROFILE.areas && PROFILE.areas.length) ? PROFILE.areas : (PROFILE && PROFILE.area ? [PROFILE.area] : []);
+  var normalized = areas.map(normalizeAreaName);
+  return normalized.indexOf('qualidade') !== -1 || normalized.indexOf('gerencia de planejamento e producao') !== -1;
+}
+
+function isUserGerencia(){
+  var areas = (PROFILE && PROFILE.areas && PROFILE.areas.length) ? PROFILE.areas : (PROFILE && PROFILE.area ? [PROFILE.area] : []);
+  var normalized = areas.map(normalizeAreaName);
+  return normalized.indexOf('gerencia de planejamento e producao') !== -1;
+}
+
+function applyHomeBlockOrderForProfile(){
+  var container = document.getElementById('home-blocks');
+  var devBlock = document.getElementById('block-devolucoes');
+  var pendBlock = document.getElementById('block-pendencias');
+  var rncBlock = document.getElementById('block-rncs');
+  if (!(container && devBlock && pendBlock && rncBlock)) return;
+
+  container.appendChild(devBlock);
+  container.appendChild(pendBlock);
+  container.appendChild(rncBlock);
+
+  if (isUserGerencia()) {
+    container.insertBefore(rncBlock, devBlock);
+    container.insertBefore(pendBlock, devBlock);
+  }
+}
+
+function updateCountLabel(id, value){
+  var el = document.getElementById(id);
+  if (el) el.textContent = '(' + value + ')';
+}
+
+function toggleSection(btn){
+  var targetId = btn && btn.dataset ? btn.dataset.target : '';
+  var wrap = targetId ? document.getElementById(targetId) : null;
+  if (!wrap) return;
+  var nowHidden = wrap.classList.toggle('hidden');
+  btn.textContent = nowHidden ? '▶' : '▼';
+}
+
+function maskDateInput(val){
+  var digits = String(val || '').replace(/\D/g, '').slice(0, 8);
+  var parts = [];
+  if (digits.length <= 2) return digits;
+  parts.push(digits.slice(0, 2));
+  if (digits.length <= 4) return parts[0] + '/' + digits.slice(2);
+  parts.push(digits.slice(2, 4));
+  parts.push(digits.slice(4));
+  return parts.join('/');
+}
+
+function isValidDateBR(str){
+  var m = /^\s*(\d{2})\/(\d{2})\/(\d{4})\s*$/.exec(str || '');
+  if (!m) return false;
+  var d = parseInt(m[1], 10);
+  var mo = parseInt(m[2], 10) - 1;
+  var y = parseInt(m[3], 10);
+  var dt = new Date(y, mo, d);
+  return dt.getFullYear() === y && dt.getMonth() === mo && dt.getDate() === d;
+}
+
+function parseDateBR(str){
+  var m = /^\s*(\d{2})\/(\d{2})\/(\d{4})\s*$/.exec(str || '');
+  if (!m) return null;
+  var d = parseInt(m[1], 10);
+  var mo = parseInt(m[2], 10) - 1;
+  var y = parseInt(m[3], 10);
+  var dt = new Date(y, mo, d);
+  return (dt.getFullYear() === y && dt.getMonth() === mo && dt.getDate() === d) ? dt : null;
+}
+
+function getSolucoesAtuais(){
+  return (CURRENT_RESPOSTA && Array.isArray(CURRENT_RESPOSTA.solucoes)) ? CURRENT_RESPOSTA.solucoes : [];
+}
+
+function getAcoesValidadasAtuais(){
+  var arr = (CURRENT_VALIDACAO_CONCLUSAO && Array.isArray(CURRENT_VALIDACAO_CONCLUSAO.acoesValidadas)) ? CURRENT_VALIDACAO_CONCLUSAO.acoesValidadas : [];
+  return arr
+    .map(function(v){ return parseInt(v, 10); })
+    .filter(function(n){ return !isNaN(n) && n >= 0; });
+}
+
+function getAcoesConcluidasAtuais(){
+  var arr = (CURRENT_VALIDACAO_CONCLUSAO && Array.isArray(CURRENT_VALIDACAO_CONCLUSAO.acoesConcluidas)) ? CURRENT_VALIDACAO_CONCLUSAO.acoesConcluidas : [];
+  return arr
+    .map(function(v){ return parseInt(v, 10); })
+    .filter(function(n){ return !isNaN(n) && n >= 0; });
+}
+
+function getRowColor(val){
+  var v = String(val || '').trim().toLowerCase();
+  if (v === 'verde') return '#15803d';
+  if (v === 'vermelho') return '#b91c1c';
+  if (v === 'cinza') return '#9ca3af';
+  return 'var(--text)';
+}
+
+function applyRowColor(tr, corVal){
+  if (tr) tr.style.color = getRowColor(corVal);
+}
+
+function getCellValue(row, colIndex){
+  var cell = row && row.children ? row.children[colIndex] : null;
+  return cell ? cell.textContent.trim() : '';
+}
+
+function getUniqueColumnValues(tbl, colIndex){
+  var vals = [];
+  var seen = {};
+  var rows = tbl ? tbl.querySelectorAll('tbody tr') : [];
+  Array.prototype.forEach.call(rows, function(tr){
+    var val = getCellValue(tr, colIndex);
+    var key = val || '';
+    if (!seen[key]){
+      seen[key] = true;
+      vals.push(val);
+    }
+  });
+  return vals.sort();
+}
+
+function getTableFilterState(tbl){
+  if (!tbl._filterSelections) tbl._filterSelections = {};
+  return tbl._filterSelections;
+}
+
+var columnFilterOverlay;
+
+function buildColumnFilterOverlay(){
+  if (columnFilterOverlay) return columnFilterOverlay;
+  var root = document.createElement('div');
+  root.className = 'filter-overlay hidden';
+
+  var backdrop = document.createElement('div');
+  backdrop.className = 'filter-backdrop';
+  root.appendChild(backdrop);
+
+  var dialog = document.createElement('div');
+  dialog.className = 'filter-dialog';
+  root.appendChild(dialog);
+
+  var header = document.createElement('div');
+  header.className = 'filter-header';
+  dialog.appendChild(header);
+
+  var title = document.createElement('h4');
+  title.className = 'filter-title';
+  title.textContent = 'Filtro';
+  header.appendChild(title);
+
+  var closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'btn-grey btn-small filter-close';
+  closeBtn.textContent = '×';
+  header.appendChild(closeBtn);
+
+  var body = document.createElement('div');
+  body.className = 'filter-body';
+  dialog.appendChild(body);
+
+  var selectAllWrap = document.createElement('label');
+  selectAllWrap.className = 'checkbox-inline filter-option';
+  var selectAllInput = document.createElement('input');
+  selectAllInput.type = 'checkbox';
+  selectAllInput.checked = true;
+  selectAllWrap.appendChild(selectAllInput);
+  var selectAllText = document.createElement('span');
+  selectAllText.className = 'filter-option-label';
+  selectAllText.textContent = 'Selecionar todos';
+  selectAllWrap.appendChild(selectAllText);
+  body.appendChild(selectAllWrap);
+
+  var optionsWrap = document.createElement('div');
+  optionsWrap.className = 'filter-options';
+  body.appendChild(optionsWrap);
+
+  var actions = document.createElement('div');
+  actions.className = 'filter-actions';
+  dialog.appendChild(actions);
+
+  var applyBtn = document.createElement('button');
+  applyBtn.type = 'button';
+  applyBtn.className = 'btn';
+  applyBtn.textContent = 'Aplicar';
+  actions.appendChild(applyBtn);
+
+  var clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.className = 'btn-grey';
+  clearBtn.textContent = 'Limpar';
+  actions.appendChild(clearBtn);
+
+  columnFilterOverlay = {
+    root: root,
+    title: title,
+    optionsWrap: optionsWrap,
+    selectAll: selectAllInput,
+    applyBtn: applyBtn,
+    clearBtn: clearBtn,
+    closeBtn: closeBtn,
+    currentTable: null,
+    currentCol: null,
+    currentValues: []
+  };
+
+  backdrop.addEventListener('click', closeColumnFilterOverlay);
+  closeBtn.addEventListener('click', closeColumnFilterOverlay);
+  clearBtn.addEventListener('click', function(){
+    if (!columnFilterOverlay.currentTable) return;
+    var state = getTableFilterState(columnFilterOverlay.currentTable);
+    delete state[columnFilterOverlay.currentCol];
+    applyTableFilters(columnFilterOverlay.currentTable);
+    closeColumnFilterOverlay();
+  });
+  applyBtn.addEventListener('click', function(){
+    if (!columnFilterOverlay.currentTable) return;
+    var checkboxes = columnFilterOverlay.optionsWrap.querySelectorAll('input[type="checkbox"]');
+    var selected = [];
+    Array.prototype.forEach.call(checkboxes, function(cb){
+      if (cb.checked) selected.push(cb.value);
+    });
+    var state = getTableFilterState(columnFilterOverlay.currentTable);
+    if (selected.length === columnFilterOverlay.currentValues.length){
+      delete state[columnFilterOverlay.currentCol];
+    } else {
+      state[columnFilterOverlay.currentCol] = new Set(selected);
+    }
+    applyTableFilters(columnFilterOverlay.currentTable);
+    closeColumnFilterOverlay();
+  });
+  selectAllInput.addEventListener('change', function(){
+    var checkboxes = columnFilterOverlay.optionsWrap.querySelectorAll('input[type="checkbox"]');
+    Array.prototype.forEach.call(checkboxes, function(cb){ cb.checked = selectAllInput.checked; });
+  });
+
+  document.body.appendChild(root);
+  return columnFilterOverlay;
+}
+
+function closeColumnFilterOverlay(){
+  if (columnFilterOverlay) columnFilterOverlay.root.classList.add('hidden');
+}
+
+function openColumnFilter(tbl, colIndex){
+  var overlay = buildColumnFilterOverlay();
+  overlay.currentTable = tbl;
+  overlay.currentCol = colIndex;
+  overlay.currentValues = getUniqueColumnValues(tbl, colIndex);
+
+  var thead = tbl ? tbl.querySelector('thead') : null;
+  var headerRow = thead ? thead.querySelector('tr') : null;
+  var headerCell = headerRow && headerRow.children ? headerRow.children[colIndex] : null;
+  overlay.title.textContent = headerCell ? (headerCell.textContent.trim() || 'Filtro') : 'Filtro';
+
+  overlay.optionsWrap.innerHTML = '';
+
+  var state = getTableFilterState(tbl);
+  var selectedSet = state[colIndex] instanceof Set ? state[colIndex] : null;
+  var selectAll = !selectedSet || selectedSet.size === overlay.currentValues.length;
+  overlay.selectAll.checked = selectAll;
+
+  overlay.currentValues.forEach(function(val){
+    var opt = document.createElement('label');
+    opt.className = 'filter-option';
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = val;
+    cb.checked = selectAll || (selectedSet ? selectedSet.has(val) : true);
+    opt.appendChild(cb);
+    var txt = document.createElement('span');
+    txt.className = 'filter-option-label';
+    txt.textContent = val || '(Vazio)';
+    opt.appendChild(txt);
+    overlay.optionsWrap.appendChild(opt);
+  });
+
+  overlay.root.classList.remove('hidden');
+}
+
+function ensureTableFilters(tbl){
+  if (!tbl) return;
+  var thead = tbl.querySelector('thead');
+  if (!thead) return;
+  var headerRow = null;
+  Array.prototype.forEach.call(thead.querySelectorAll('tr'), function(tr){
+    if (!tr.classList.contains('filters-row') && !headerRow) headerRow = tr;
+  });
+  if (!headerRow) return;
+
+  var existing = thead.querySelector('tr.filters-row');
+  if (existing) existing.remove();
+
+  var filterRow = document.createElement('tr');
+  filterRow.className = 'filters-row';
+  var colCount = headerRow.children.length;
+  for (var i=0; i<colCount; i++){
+    var th = document.createElement('th');
+    th.className = 'filter-cell';
+    var wrap = document.createElement('div');
+    wrap.className = 'filter-btn-group';
+
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'filter-btn filter-btn-open';
+    btn.innerHTML = '<span class="filter-icon" aria-hidden="true"></span><span class="sr-only">Filtro</span>';
+    btn.title = 'Abrir filtro';
+    btn.dataset.colIndex = String(i);
+    btn.addEventListener('click', function(){
+      var col = parseInt(this.dataset.colIndex, 10);
+      openColumnFilter(tbl, col);
+    });
+    wrap.appendChild(btn);
+
+    var clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.className = 'filter-btn filter-btn-clear';
+    clearBtn.textContent = '×';
+    clearBtn.title = 'Limpar filtro';
+    clearBtn.dataset.colIndex = String(i);
+    clearBtn.addEventListener('click', function(){
+      var col = parseInt(this.dataset.colIndex, 10);
+      var state = getTableFilterState(tbl);
+      delete state[col];
+      applyTableFilters(tbl);
+    });
+    wrap.appendChild(clearBtn);
+
+    th.appendChild(wrap);
+    filterRow.appendChild(th);
+  }
+  thead.appendChild(filterRow);
+    syncStickyHeaderOffsets(tbl);
+
+  updateFilterButtons(tbl);
+}
+
+function syncStickyHeaderOffsets(tbl){
+  if (!tbl) return;
+  var headerRow = tbl.querySelector('thead tr:not(.filters-row)');
+  if (!headerRow) return;
+
+  // Usa a altura renderizada (com frações) e sobrepõe 2px para eliminar fresta
+  // entre cabeçalho e filtros em claro/escuro (inclusive com borda/subpixel).
+  var renderedHeaderHeight = Math.ceil(headerRow.getBoundingClientRect().height || headerRow.offsetHeight || 0);
+  var stickyTop = Math.max(renderedHeaderHeight - 2, 0);
+  Array.prototype.forEach.call(tbl.querySelectorAll('thead tr.filters-row th'), function(th){
+    th.style.top = stickyTop + 'px';
+  });
+}
+
+function applyTableFilters(tbl){
+  if (!tbl) return;
+  var state = getTableFilterState(tbl);
+  var rows = tbl.querySelectorAll('tbody tr');
+  Array.prototype.forEach.call(rows, function(tr){
+    var visible = true;
+    for (var key in state){
+      if (!Object.prototype.hasOwnProperty.call(state, key)) continue;
+      var allowed = state[key];
+      if (!(allowed instanceof Set)) continue;
+      var colIdx = parseInt(key, 10);
+      var val = getCellValue(tr, colIdx);
+      if (allowed.size === 0 || !allowed.has(val)) { visible = false; break; }
+    }
+    tr.style.display = visible ? '' : 'none';
+  });
+
+  updateFilterButtons(tbl);
+    updateHomeTableVerticalScroll(tbl);
+}
+
+function updateHomeTableVerticalScroll(tbl){
+  if (!tbl || ['devTbl', 'tbl', 'finTbl'].indexOf(tbl.id) === -1) return;
+
+  syncStickyHeaderOffsets(tbl);
+
+  var wrap = tbl.closest('.table-wrap');
+  if (!wrap) return;
+
+  if (tbl.classList.contains('hidden')) {
+    wrap.style.maxHeight = '';
+    return;
+  }
+
+  var maxRows = 10;
+  var visibleRows = Array.prototype.filter.call(tbl.querySelectorAll('tbody tr'), function(tr){
+    return tr.style.display !== 'none';
+  });
+
+  if (!visibleRows.length || visibleRows.length <= maxRows) {
+    wrap.style.maxHeight = '';
+    return;
+  }
+
+  var headerHeight = 0;
+  Array.prototype.forEach.call(tbl.querySelectorAll('thead tr'), function(tr){
+    headerHeight += tr.offsetHeight || 0;
+  });
+
+  var rowsHeight = 0;
+  for (var i = 0; i < Math.min(maxRows, visibleRows.length); i++) {
+    rowsHeight += visibleRows[i].offsetHeight || 0;
+  }
+
+  if (headerHeight <= 0 || rowsHeight <= 0) {
+    wrap.style.maxHeight = '';
+    return;
+  }
+
+  wrap.style.maxHeight = (headerHeight + rowsHeight + 2) + 'px';
+}
+
+function updateFilterButtons(tbl){
+  if (!tbl) return;
+  var state = getTableFilterState(tbl);
+  var headerRow = tbl.querySelector('thead tr.filters-row');
+  if (!headerRow) return;
+
+  Array.prototype.forEach.call(headerRow.querySelectorAll('.filter-btn-open, .filter-btn-clear'), function(btn){
+    var col = parseInt(btn.dataset.colIndex, 10);
+    var isActive = state[col] instanceof Set;
+    btn.classList.toggle('filter-btn-active', isActive);
+    btn.classList.toggle('filter-btn-inactive', !isActive);
+  });
+}
+
+/* ===== util para evidências no formulário de Abertura (Corrigir) ===== */
+function ensureCriarEvidenceBox(){
+  var list = document.getElementById('criar_evidList');
+  if (list) return list;
+  var firstRow = document.getElementById('rncCriar');
+  var anchor = firstRow ? firstRow.parentElement : (document.getElementById('anexos')||{}).parentElement;
+  if (!anchor || !anchor.parentNode) return null;
+
+  var box = document.createElement('div');
+  box.id = 'criar_evidBox';
+  box.style.marginBottom = '12px';
+
+  var label = document.createElement('div');
+  label.textContent = 'Evidências de abertura';
+  label.style.fontWeight = '600';
+  label.style.margin = '6px 0 4px';
+
+  var listDiv = document.createElement('div');
+  listDiv.id = 'criar_evidList';
+  listDiv.className = 'muted';
+  listDiv.textContent = '—';
+
+  box.appendChild(label);
+  box.appendChild(listDiv);
+  anchor.parentNode.insertBefore(box, anchor);
+  return listDiv;
+}
+
+function renderLinks(list){
+  return (list && list.length)
+    ? list.map(function(a){ return '<a class="link" href="'+esc(a.url)+'" target="_blank">'+esc(a.name)+'</a>'; }).join(' • ')
+    : '—';
+}
+
+function splitAnexosPorTipo(list){
+  var abert = [], resp = [], conc = [], improc = [];
+  (list || []).forEach(function(a){
+    var nm = String(a && a.name || '').toLowerCase();
+    if (nm.indexOf(' - resp') >= 0) resp.push(a);
+    else if (nm.indexOf(' - conc') >= 0) conc.push(a);
+    else if (nm.indexOf(' - improcedente') >= 0) improc.push(a);
+    else abert.push(a);
+  });
+  return { abertura: abert, resposta: resp, conclusao: conc, improcedente: improc };
+}
+
+function atualizarEstadoAnexos(list){
+  var partes = splitAnexosPorTipo(list || []);
+  ANEXOS_ABERTURA = partes.abertura;
+  ANEXOS_RESPOSTA = partes.resposta;
+  ANEXOS_CONCLUSAO = partes.conclusao;
+  ANEXOS_IMPROCEDENTE = partes.improcedente;
+}
+
+function renderValAnexos(isImprocedente){
+  var valRespLabel = document.getElementById('val_respAnexosRespLabel');
+  var valConcLabel = document.getElementById('val_respAnexosConcLabel');
+  var valConcBox = document.getElementById('val_respAnexosConcBox');
+  var anexosRespValidacao = isImprocedente ? ANEXOS_IMPROCEDENTE : ANEXOS_RESPOSTA;
+  if (valRespLabel) valRespLabel.textContent = isImprocedente ? 'Evidências de improcedência' : 'Evidências de resposta';
+  if (valConcLabel) valConcLabel.textContent = 'Evidências de conclusão';
+  if (valConcBox) valConcBox.classList.toggle('hidden', isImprocedente);
+  var vAxR = document.getElementById('val_respAnexosResp'); if (vAxR) vAxR.innerHTML = renderLinks(anexosRespValidacao);
+  var vAxC = document.getElementById('val_respAnexosConc'); if (vAxC) vAxC.innerHTML = renderLinks(ANEXOS_CONCLUSAO);
+}
+
+function renderAnexosComAcao(containerId, list, tipo){
+  var cont = document.getElementById(containerId);
+  if (!cont) return;
+  cont.innerHTML = '';
+  if (!list || !list.length){ cont.textContent = '—'; return; }
+
+  list.forEach(function(a){
+    var line = document.createElement('div');
+    line.className = 'anexo-line';
+
+    var link = document.createElement('a');
+    link.className = 'link';
+    link.href = a.url;
+    link.target = '_blank';
+    link.textContent = a.name;
+    line.appendChild(link);
+
+    if (DEV_MODE === tipo) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'Excluir';
+      btn.className = 'btn btn-grey btn-small';
+      btn.style.marginLeft = '8px';
+      btn.onclick = function(){ excluirAnexo(tipo, a.name); };
+      line.appendChild(btn);
+    }
+
+    cont.appendChild(line);
+  });
+}
+
+function excluirAnexo(tipo, nome){
+  var rncId = (tipo === 'abertura') ? (document.getElementById('rncCriar').value || '') : (document.getElementById('resp_rnc').value || '');
+  if (!rncId || !nome) return;
+
+  var msgEl = (tipo === 'abertura') ? document.getElementById('msgCriar') : document.getElementById('respMsg');
+  if (msgEl) msgEl.textContent = 'Excluindo evidência...';
+
+  google.script.run
+    .withFailureHandler(function(err){ if (msgEl) msgEl.textContent = (err && err.message) ? err.message : String(err); })
+    .withSuccessHandler(function(res){
+      if (msgEl) msgEl.textContent = 'Evidência excluída.';
+      atualizarEstadoAnexos(res && res.anexos ? res.anexos : null);
+      renderAnexosComAcao('criar_evidList', ANEXOS_ABERTURA, 'abertura');
+      renderAnexosComAcao('resp_anexosAbertura', ANEXOS_ABERTURA, 'abertura');
+      renderAnexosComAcao('resp_anexosResposta', ANEXOS_RESPOSTA, 'resposta');
+      renderAnexosComAcao('resp_anexosConclusao', ANEXOS_CONCLUSAO, 'conclusao');
+      var isImprocedenteAtual = !!(CURRENT_RESPOSTA && ((CURRENT_RESPOSTA.motivoImprocedente && String(CURRENT_RESPOSTA.motivoImprocedente).trim()) || String(CURRENT_RESPOSTA.tipo || '').toLowerCase() === 'improcedente'));
+      renderValAnexos(isImprocedenteAtual);
+    })
+    .excluirAnexoRNC(TOKEN, rncId, nome);
+}
+
+/* Força Porquês empilhados (Visualizar) */
+function forceStackedVisPorques(){
+  ['vis_pq1','vis_pq2','vis_pq3','vis_pq4','vis_pq5'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (!el) return;
+    try {
+      el.setAttribute('rows', '1');
+      autoResizeTextarea(el);
+    } catch(_) {}
+  });
+}
+
+
+function autoResizeTextarea(el){
+  if (!el) return;
+  if (!el.dataset.baseHeight){
+    var cs = window.getComputedStyle(el);
+    var rows = Number(el.getAttribute('rows') || 2);
+    var lineHeight = parseFloat(cs.lineHeight);
+    if (!lineHeight || !isFinite(lineHeight)) lineHeight = 20;
+    var padding = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    var border = (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+    var baseHeight = Math.ceil((lineHeight * rows) + padding + border);
+    el.dataset.baseHeight = String(baseHeight);
+  }
+  var minHeight = Number(el.dataset.baseHeight || 0);
+  el.style.height = 'auto';
+  el.style.height = Math.max(el.scrollHeight, minHeight) + 'px';
+}
+
+function autoResizeWithin(container){
+  if (!container) return;
+  Array.prototype.forEach.call(container.querySelectorAll('textarea.autoresize'), function(el){
+    autoResizeTextarea(el);
+  });
+}
+
+function autoResizePrintFields(){
+  function resizePrintField(el){
+    if (!el) return;
+    var cs = window.getComputedStyle(el);
+    var lineHeight = parseFloat(cs.lineHeight);
+    if (!lineHeight || !isFinite(lineHeight)) lineHeight = 20;
+    var padding = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    var border = (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+    var minHeight = Math.ceil(lineHeight + padding + border);
+    var hasValueProp = typeof el.value === 'string';
+    var content = hasValueProp ? String(el.value || '') : String(el.textContent || '');
+    var hasContent = content.trim().length > 0;
+
+    el.style.overflowY = 'hidden';
+    el.style.resize = 'none';
+
+    if (hasValueProp){
+      var originalValue = el.value;
+      el.value = hasContent ? (originalValue + '\n') : '';
+      el.style.height = 'auto';
+      var measuredHeight = el.scrollHeight;
+      el.value = originalValue;
+      el.style.height = 'auto';
+      el.style.height = Math.max(hasContent ? measuredHeight : minHeight, minHeight) + 'px';
+      return;
+    }
+
+    el.style.height = 'auto';
+    var fallbackHeight = hasContent ? (el.scrollHeight + lineHeight) : minHeight;
+    el.style.height = Math.max(fallbackHeight, minHeight) + 'px';
+  }
+
+  var fixedIds = [
+    'vis_descricao',
+    'vis_descCorrecao',
+    'vis_motivoImprocedente',
+    'vis_pq1',
+    'vis_pq2',
+    'vis_pq3',
+    'vis_pq4',
+    'vis_pq5'
+  ];
+  fixedIds.forEach(function(id){
+    var el = document.getElementById(id);
+    resizePrintField(el);
+  });
+
+  var viewVisualizar = document.getElementById('view-visualizar');
+  if (!viewVisualizar) return;
+  Array.prototype.forEach.call(
+    viewVisualizar.querySelectorAll('#vis_solucoesList textarea.autoresize'),
+    function(el){
+      resizePrintField(el);
+    }
+  );
+}
+
+function prepareAndPrintVisualizar(){
+  var viewVisualizar = document.getElementById('view-visualizar');
+  if (!viewVisualizar) {
+    window.print();
+    return;
+  }
+  viewVisualizar.classList.add('is-printing');
+  requestAnimationFrame(function(){
+    requestAnimationFrame(function(){
+      autoResizePrintFields();
+      window.print();
+    });
+  });
+}
+
+/* ================== Bindings iniciais ================== */
+document.getElementById('btnEntrar').onclick = doLogin;
+document.getElementById('btnCriar').onclick  = function(){ abrirCriar(true); };
+/* NOVO: Atualizar home sem fazer refresh do navegador */
+document.getElementById('btnAtualizar').onclick = function(){ carregarTabelas(); };
+initTheme();
+
+Array.prototype.forEach.call(document.querySelectorAll('[data-theme-toggle]'), function(btn){
+  btn.onclick = toggleTheme;
+});
+updateThemeButtonLabel(document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
+
+document.getElementById('btnInstrucoes').onclick = function(){
+  var modal = document.getElementById('instrModal');
+  if (modal) modal.classList.remove('hidden');
+};
+document.getElementById('btnSair').onclick   = doLogout;
+document.getElementById('btnVoltar').onclick = function(){ hide('view-criar'); show('view-home'); sairDeEdicao(); carregarTabelas(); };
+document.getElementById('btnEnviar').onclick = enviarCriar;
+
+document.getElementById('btnRespVoltar').onclick = function(){ hide('view-responder'); show('view-home'); carregarTabelas(); };
+document.getElementById('btnVisVoltar').onclick  = function(){ hide('view-visualizar'); show('view-home'); carregarTabelas(); };
+document.getElementById('btnVisImprimir').onclick = prepareAndPrintVisualizar;
+
+window.addEventListener('beforeprint', function(){
+  var viewVisualizar = document.getElementById('view-visualizar');
+  if (!viewVisualizar) return;
+  viewVisualizar.classList.add('is-printing');
+  autoResizePrintFields();
+});
+
+window.addEventListener('afterprint', function(){
+  var viewVisualizar = document.getElementById('view-visualizar');
+  if (!viewVisualizar) return;
+  viewVisualizar.classList.remove('is-printing');
+  autoResizeWithin(viewVisualizar);
+});
+
+// NOVO: botão Atualizar na home (sem dar refresh do navegador)
+var _btnAtualizar = document.getElementById('btnAtualizar');
+if (_btnAtualizar) {
+  _btnAtualizar.onclick = function(){
+    var tm = document.getElementById('tblMsg');     if (tm) tm.textContent = 'Atualizando…';
+    var dm = document.getElementById('devTblMsg');  if (dm) dm.textContent = 'Atualizando…';
+    var fm = document.getElementById('finTblMsg');  if (fm) fm.textContent = 'Atualizando…';
+    carregarTabelas();
+  };
+}
+
+Array.prototype.forEach.call(document.querySelectorAll('.toggle-btn'), function(btn){
+  btn.addEventListener('click', function(){ toggleSection(btn); });
+});
+
+var _btnCloseInstr = document.getElementById('closeInstr');
+if (_btnCloseInstr){
+  _btnCloseInstr.onclick = function(){
+    var modal = document.getElementById('instrModal');
+    if (modal) modal.classList.add('hidden');
+  };
+}
+var _modalBackdrop = document.querySelector('#instrModal .modal-backdrop');
+if (_modalBackdrop){
+  _modalBackdrop.addEventListener('click', function(){
+    var modal = document.getElementById('instrModal');
+    if (modal) modal.classList.add('hidden');
+  });
+}
+
+document.addEventListener('keydown', function (ev) {
+  if (!document.getElementById('view-login').classList.contains('hidden') && ev.key === 'Enter') doLogin();
+});
+
+/* ================== LOGIN / SESSÃO ================== */
+function doLogin(){
+  var u = document.getElementById('inUser').value.trim();
+  var p = document.getElementById('inPass').value.trim();
+  setMsg('Autenticando...');
+  google.script.run
+    .withFailureHandler(function(err){ setMsg(err && err.message ? err.message : String(err), true); })
+    .withSuccessHandler(function(res){
+      TOKEN = res.token;
+      PROFILE = { usuario: res.usuario, nome: res.nome, area: res.area || '', areas: Array.isArray(res.areas) ? res.areas : [], supervisor: res.supervisor || '' };
+      var areaInfo = PROFILE.areas && PROFILE.areas.length ? PROFILE.areas.join(', ') : PROFILE.area;
+      var helloEl = document.getElementById('hello');
+      if (helloEl) helloEl.textContent = 'Olá, ' + (PROFILE.nome || PROFILE.usuario) + '!';
+      var helloSub = document.getElementById('helloSub');
+      if (helloSub) helloSub.innerHTML = 'Bem-vindo ao Portal RNCs' + (areaInfo ? '<br>Setor: ' + areaInfo : '');
+      applyHomeBlockOrderForProfile();
+      hide('view-login'); show('view-home'); setMsg('');
+      carregarTabelas();
+    })
+    .login(u, p);
+}
+function doLogout(){
+beginGlobalLoading();
+  google.script.run
+    .withFailureHandler(function(err){
+      endGlobalLoading();
+      setMsg(err && err.message ? err.message : String(err), true);
+    })
+    .withSuccessHandler(function(){
+      endGlobalLoading();
+      TOKEN=null; PROFILE=null; sairDeEdicao();
+      applyHomeBlockOrderForProfile();
+      document.getElementById('inUser').value=''; document.getElementById('inPass').value='';
+      hide('view-home'); hide('view-criar'); hide('view-responder'); hide('view-visualizar'); show('view-login');
+      setMsg('');
+    })
+    .logout(TOKEN);
+}
+
+var GLOBAL_LOADING_COUNT = 0;
+function getGlobalLoadingModal(){
+  var modal = document.getElementById('globalLoadingModal');
+  if (modal) return modal;
+
+  var source = document.getElementById('logoutLoadingModal');
+  if (source && document.body){
+    modal = source.cloneNode(true);
+    modal.id = 'globalLoadingModal';
+    modal.classList.add('hidden');
+    modal.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(modal);
+    return modal;
+  }
+
+  return source || null;
+}
+
+function beginGlobalLoading(){
+  GLOBAL_LOADING_COUNT += 1;
+  var loadingModal = getGlobalLoadingModal();
+  if (loadingModal) loadingModal.classList.remove('hidden');
+}
+
+function endGlobalLoading(){
+  GLOBAL_LOADING_COUNT = Math.max(0, GLOBAL_LOADING_COUNT - 1);
+  if (GLOBAL_LOADING_COUNT > 0) return;
+  var loadingModal = getGlobalLoadingModal();
+  if (loadingModal) loadingModal.classList.add('hidden');
+}
+
+/* ================== HOME: carregar os 2 paineis ================== */
+function carregarTabelas(){
+  updateCountLabel('devCount', 0);
+  updateCountLabel('pendCount', 0);
+  updateCountLabel('finCount', 0);
+  LAST_DEV_ROWS = []; LAST_PEND_ROWS = []; LAST_ALL_ROWS = []; LAST_RNC_ROWS = [];
+  renderHomeDashboard();
+  carregarDevolucoes();
+  carregarRNCs();
+  carregarFinalizadas();
+}
+
+function carregarDevolucoes(){
+  var devMsg = document.getElementById('devTblMsg');
+  var devTbl = document.getElementById('devTbl');
+  var devBody = document.getElementById('devTblBody');
+  ensureTableFilters(devTbl);
+  devMsg.textContent = 'Carregando devoluções…';
+  devTbl.classList.add('hidden');
+  devBody.innerHTML = '';
+
+ LAST_DEV_ROWS = [];
+
+  google.script.run
+    .withFailureHandler(function(err){
+      devMsg.textContent = (err && err.message) ? err.message : String(err);
+    })
+    .withSuccessHandler(function(rows){
+      LAST_DEV_ROWS = Array.isArray(rows) ? rows : [];
+      updateCountLabel('devCount', LAST_DEV_ROWS.length || 0);
+      renderHomeDashboard();
+      if (!rows || !rows.length){
+        devMsg.textContent = 'Nenhuma devolução pendente.';
+        return;
+      }
+      devMsg.textContent = '';
+      rows.forEach(function(r){
+        var rncDisplay = (r.rnc || '').replace(/^RNC\s*/i,'');
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td class="nowrap"><a href="#" class="link viewLink" data-rnc="'+esc(r.rnc)+'" data-ano="'+esc(r.ano)+'" data-mes="'+esc(r.mesNome)+'">'+esc(rncDisplay)+'</a></td>'+
+          '<td>'+esc(r.status)+'</td>'+
+          '<td class="nowrap">'+esc(r.prazoControle)+'</td>'+
+          '<td class="nowrap"><a href="#" class="link corrigirLink" data-dev="'+esc(r.devolucaoTipo||'abertura')+'" data-rnc="'+esc(r.rnc)+'" data-ano="'+esc(r.ano)+'" data-mes="'+esc(r.mesNome)+'">Corrigir</a></td>'+
+          '<td>'+esc(r.cliente)+'</td>'+
+          '<td>'+esc(r.fornecedor)+'</td>'+
+          '<td>'+esc(r.descNC)+'</td>'+
+          '<td>'+esc(r.plano)+'</td>'+
+          '<td>'+esc(r.respPlano)+'</td>'+
+          '<td class="nowrap">'+esc(r.prazo)+'</td>'+
+          '<td class="nowrap">'+esc(r.conclusao)+'</td>'+
+          '<td>'+esc(r.tipo)+'</td>'+
+          '<td>'+esc(r.retorno||'')+'</td>';
+        applyRowColor(tr, r.cor);
+        devBody.appendChild(tr);
+      });
+
+      Array.prototype.forEach.call(document.querySelectorAll('#devTbl .viewLink'), function(a){
+        a.addEventListener('click', function(ev){
+          ev.preventDefault();
+          if (window.abrirVisualizar) window.abrirVisualizar(this.dataset.rnc, this.dataset.ano, this.dataset.mes);
+        });
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('#devTbl .corrigirLink'), function(a){
+        a.addEventListener('click', function(ev){
+          ev.preventDefault();
+          var tipo = this.dataset.dev || 'abertura';
+          if (tipo === 'resposta') {
+            if (window.abrirResponder) window.abrirResponder(this.dataset.rnc, this.dataset.ano, this.dataset.mes, 'resposta');
+          } else if (tipo === 'conclusao') {
+            if (window.abrirConcluir) window.abrirConcluir(this.dataset.rnc, this.dataset.ano, this.dataset.mes, 'conclusao');
+          } else {
+            if (window.abrirCorrigir) window.abrirCorrigir(this.dataset.rnc, this.dataset.ano, this.dataset.mes);
+          }
+        });
+      });
+      applyTableFilters(devTbl);
+      devTbl.classList.remove('hidden');
+            updateHomeTableVerticalScroll(devTbl);
+    })
+    .listarDevolucoesDoUsuario(TOKEN);
+}
+
+function carregarRNCs(){
+  var tblMsg = document.getElementById('tblMsg');
+  var tbl = document.getElementById('tbl');
+  var tbody = document.getElementById('tblBody');
+  ensureTableFilters(tbl);
+  tblMsg.textContent = 'Carregando RNCs…';
+  tbl.classList.add('hidden');
+  tbody.innerHTML = '';
+
+  LAST_ALL_ROWS = [];
+  LAST_PEND_ROWS = [];
+
+  google.script.run
+    .withFailureHandler(function(err){
+      tblMsg.textContent = (err && err.message) ? err.message : String(err);
+    })
+    .withSuccessHandler(function(rows){
+      LAST_ALL_ROWS = Array.isArray(rows) ? rows : [];
+      var isQuali = isUserQualidade();
+      var isGerencia = isUserGerencia();
+      var canValidar = isQuali || isGerencia;
+      var displayRows = [];
+      if (!rows || !rows.length){
+        tblMsg.textContent = isQuali ? 'Nenhuma pendência para a qualidade.' : 'Nenhuma RNC encontrada para sua área.';
+        updateCountLabel('pendCount', 0);
+        LAST_PEND_ROWS = [];
+        renderHomeDashboard();
+        return;
+      }
+      tblMsg.textContent = '';
+      rows.forEach(function(r){
+        var rncDisplay = (r.rnc || '').replace(/^RNC\s*/i,'');
+        var acaoHtml = '';
+        var userAreas = (PROFILE.areas && PROFILE.areas.length) ? PROFILE.areas : (PROFILE.area ? [PROFILE.area] : []);
+        var areasLower = userAreas.map(function(a){ return (a || '').toLowerCase().trim(); });
+        var fornecedorLower = (r.fornecedor || '').toLowerCase();
+        var mesmoFornecedor = areasLower.indexOf(fornecedorLower) !== -1;
+        var statusAB = r.statusAbertura || '';
+        var isValidacao = statusAB.indexOf('Validação') === 0 || statusAB === 'Validação conclusão';
+        var isAguardandoConclusao = statusAB === 'Aguardando conclusão';
+
+
+        if (canValidar) {
+          if (r.statusAbertura === 'Validação abertura') {
+            acaoHtml = '<a href="#" class="link validarLink" data-mode="abertura" data-rnc="'+esc(r.rnc)+'" data-ano="'+esc(r.ano)+'" data-mes="'+esc(r.mesNome)+'">Validar abertura</a>';
+          } else if (r.statusAbertura === 'Validação resposta') {
+            acaoHtml = '<a href="#" class="link validarLink" data-mode="resposta" data-rnc="'+esc(r.rnc)+'" data-ano="'+esc(r.ano)+'" data-mes="'+esc(r.mesNome)+'">Validar resposta</a>';
+          } else if (r.statusAbertura === 'Validação conclusão') {
+            acaoHtml = '<a href="#" class="link validarLink" data-mode="conclusao" data-rnc="'+esc(r.rnc)+'" data-ano="'+esc(r.ano)+'" data-mes="'+esc(r.mesNome)+'">Validar conclusão</a>';
+          } else if (r.statusAbertura === 'Aguardando conclusão') {
+            acaoHtml = mesmoFornecedor ? '<a href="#" class="link concluirLink" data-rnc="'+esc(r.rnc)+'" data-ano="'+esc(r.ano)+'" data-mes="'+esc(r.mesNome)+'">Concluir</a>' : 'Aguardando conclusão';
+          } else if (r.statusAbertura === 'Abertura' && mesmoFornecedor) {
+            acaoHtml = '<a href="#" class="link respLink" data-rnc="'+esc(r.rnc)+'" data-ano="'+esc(r.ano)+'" data-mes="'+esc(r.mesNome)+'">Responder</a>';
+          } else if (r.statusAbertura === 'Resposta' && mesmoFornecedor) {
+            acaoHtml = '<a href="#" class="link concluirLink" data-rnc="'+esc(r.rnc)+'" data-ano="'+esc(r.ano)+'" data-mes="'+esc(r.mesNome)+'">Concluir</a>';
+          } else {
+            acaoHtml = '—';
+          }
+        } else {
+          // Usuários não-qualidade
+          if (r.statusAbertura === 'Abertura' && mesmoFornecedor) {
+            acaoHtml = '<a href="#" class="link respLink" data-rnc="'+esc(r.rnc)+'" data-ano="'+esc(r.ano)+'" data-mes="'+esc(r.mesNome)+'">Responder</a>';
+          } else if (r.statusAbertura === 'Resposta' && mesmoFornecedor) {
+            acaoHtml = '<a href="#" class="link concluirLink" data-rnc="'+esc(r.rnc)+'" data-ano="'+esc(r.ano)+'" data-mes="'+esc(r.mesNome)+'">Concluir</a>';
+          } else if (r.statusAbertura === 'Aguardando conclusão' && mesmoFornecedor) {
+            acaoHtml = '<a href="#" class="link concluirLink" data-rnc="'+esc(r.rnc)+'" data-ano="'+esc(r.ano)+'" data-mes="'+esc(r.mesNome)+'">Concluir</a>';
+          } else {
+            acaoHtml = '—';
+          }
+        }
+
+
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td class="nowrap"><a href="#" class="link viewLink" data-rnc="'+esc(r.rnc)+'" data-ano="'+esc(r.ano)+'" data-mes="'+esc(r.mesNome)+'">'+esc(rncDisplay)+'</a></td>'+
+          '<td>'+esc(r.status)+'</td>'+
+          '<td class="nowrap">'+esc(r.prazoControle)+'</td>'+
+          '<td class="nowrap">'+ acaoHtml +'</td>'+
+          '<td>'+esc(r.cliente)+'</td>'+
+          '<td>'+esc(r.fornecedor)+'</td>'+
+          '<td>'+esc(r.descNC)+'</td>'+
+          '<td>'+esc(r.plano)+'</td>'+
+          '<td>'+esc(r.respPlano)+'</td>'+
+          '<td class="nowrap">'+esc(r.prazo)+'</td>'+
+          '<td class="nowrap">'+esc(r.conclusao)+'</td>'+
+          '<td>'+esc(r.tipo)+'</td>';
+        applyRowColor(tr, r.cor);
+        tbody.appendChild(tr);
+        displayRows.push(r);
+      });
+
+      LAST_PEND_ROWS = displayRows;
+      updateCountLabel('pendCount', displayRows.length || 0);
+      renderHomeDashboard();
+      if (!displayRows.length){
+        tblMsg.textContent = isQuali ? 'Nenhuma pendência para a qualidade.' : 'Nenhuma RNC encontrada para sua área.';
+        return;
+      }
+
+      Array.prototype.forEach.call(document.querySelectorAll('#tbl .respLink'), function(a){
+        a.addEventListener('click', function(ev){
+          ev.preventDefault();
+          if (window.abrirResponder) window.abrirResponder(this.dataset.rnc, this.dataset.ano, this.dataset.mes, null);
+        });
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('#tbl .concluirLink'), function(a){
+        a.addEventListener('click', function(ev){
+          ev.preventDefault();
+          if (window.abrirConcluir) window.abrirConcluir(this.dataset.rnc, this.dataset.ano, this.dataset.mes);
+        });
+      });
+        Array.prototype.forEach.call(document.querySelectorAll('#tbl .validarLink'), function(a){
+          a.addEventListener('click', function(ev){
+            ev.preventDefault();
+            if ((isUserGerencia() || isUserQualidade()) && window.abrirValidar) {
+              window.abrirValidar(this.dataset.rnc, this.dataset.ano, this.dataset.mes, this.dataset.mode || 'abertura');
+            } else if (window.abrirVisualizar) {
+              window.abrirVisualizar(this.dataset.rnc, this.dataset.ano, this.dataset.mes);
+            }
+          });
+        });
+      Array.prototype.forEach.call(document.querySelectorAll('#tbl .viewLink'), function(a){
+        a.addEventListener('click', function(ev){
+          ev.preventDefault();
+          if (window.abrirVisualizar) window.abrirVisualizar(this.dataset.rnc, this.dataset.ano, this.dataset.mes);
+        });
+      });
+
+      applyTableFilters(tbl);
+      tbl.classList.remove('hidden');
+            updateHomeTableVerticalScroll(tbl);
+    })
+    .listarRNCsDoUsuario(TOKEN);
+}
+
+function carregarFinalizadas(){
+  var finMsg = document.getElementById('finTblMsg');
+  var finTbl = document.getElementById('finTbl');
+  var finBody = document.getElementById('finTblBody');
+  ensureTableFilters(finTbl);
+  finMsg.textContent = 'Carregando RNCs…';
+  finTbl.classList.add('hidden');
+  finBody.innerHTML = '';
+
+  LAST_RNC_ROWS = [];
+
+  google.script.run
+    .withFailureHandler(function(err){
+      finMsg.textContent = (err && err.message) ? err.message : String(err);
+    })
+    .withSuccessHandler(function(rows){
+      var isQuali = isUserQualidade();
+      var isGerencia = isUserGerencia();
+      var filtered = Array.isArray(rows) ? rows : [];
+      
+      LAST_RNC_ROWS = filtered;
+      updateCountLabel('finCount', filtered.length || 0);
+      renderHomeDashboard();
+      if (!filtered.length){
+        finMsg.textContent = 'Nenhuma RNC encontrada.';
+        return;
+      }
+      finMsg.textContent = '';
+      filtered.forEach(function(r){
+        var rncDisplay = (r.rnc || '').replace(/^RNC\s*/i,'');
+        var statusAB = r.statusAbertura || '';
+        var acaoHtml = '—';
+        var isValidacao = statusAB.indexOf('Validação') === 0 || statusAB === 'Validação conclusão';
+        if (isValidacao) {
+          var canValidar = isQuali || isGerencia;
+          if (canValidar) {
+            var mode = 'abertura';
+            if (statusAB === 'Validação resposta') mode = 'resposta';
+            else if (statusAB === 'Validação conclusão') mode = 'conclusao';
+            var label = (mode === 'resposta') ? 'Validar resposta' : (mode === 'conclusao' ? 'Validar conclusão' : 'Validar abertura');
+            acaoHtml = '<a href="#" class="link validarLink" data-mode="'+esc(mode)+'" data-rnc="'+esc(r.rnc)+'" data-ano="'+esc(r.ano)+'" data-mes="'+esc(r.mesNome)+'">'+label+'</a>';
+          }
+        }
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td class="nowrap"><a href="#" class="link viewLink" data-rnc="'+esc(r.rnc)+'" data-ano="'+esc(r.ano)+'" data-mes="'+esc(r.mesNome)+'">'+esc(rncDisplay)+'</a></td>'+
+          '<td>'+esc(r.status)+'</td>'+
+          '<td class="nowrap">'+esc(r.prazoControle)+'</td>'+
+          '<td class="nowrap">'+acaoHtml+'</td>'+
+          '<td>'+esc(r.cliente)+'</td>'+
+          '<td>'+esc(r.fornecedor)+'</td>'+
+          '<td>'+esc(r.descNC)+'</td>'+
+          '<td>'+esc(r.plano)+'</td>'+
+          '<td>'+esc(r.respPlano)+'</td>'+
+          '<td class="nowrap">'+esc(r.prazo)+'</td>'+
+          '<td class="nowrap">'+esc(r.conclusao)+'</td>'+
+          '<td>'+esc(r.tipo)+'</td>';
+        applyRowColor(tr, r.cor);          
+        finBody.appendChild(tr);
+      });
+
+      Array.prototype.forEach.call(document.querySelectorAll('#finTbl .viewLink'), function(a){
+        a.addEventListener('click', function(ev){
+          ev.preventDefault();
+          if (window.abrirVisualizar) window.abrirVisualizar(this.dataset.rnc, this.dataset.ano, this.dataset.mes);
+        });
+      });
+        Array.prototype.forEach.call(document.querySelectorAll('#finTbl .validarLink'), function(a){
+          a.addEventListener('click', function(ev){
+            ev.preventDefault();
+            if ((isUserGerencia() || isUserQualidade()) && window.abrirValidar) {
+              window.abrirValidar(this.dataset.rnc, this.dataset.ano, this.dataset.mes, this.dataset.mode || 'abertura');
+            } else if (window.abrirVisualizar) {
+              window.abrirVisualizar(this.dataset.rnc, this.dataset.ano, this.dataset.mes);
+            }
+          });
+        });
+
+      applyTableFilters(finTbl);
+      finTbl.classList.remove('hidden');
+            updateHomeTableVerticalScroll(finTbl);
+    })
+    .listarRNCsFinalizadas(TOKEN);
+}
+
+/* ================== RESPONDER / CONCLUIR / VALIDAR – lado direito ================== */
+function prepararPainelDireitoParaResposta(){
+  var ids = ['respPlaceholder','respQualidade','respForm','respValResposta'];
+  ids.forEach(function(id){ var el = document.getElementById(id); if (el) el.classList.add('hidden'); });
+    DEV_MODE = null;
+  CURRENT_RESPOSTA = null;
+  CURRENT_VALIDACAO_CONCLUSAO = null;
+
+  var rb = document.getElementById('retornoBox'); if (rb) rb.classList.add('hidden');
+  var rm = document.getElementById('retMotivo'); if (rm) rm.value = '';
+  var qm = document.getElementById('qualidadeMsg'); if (qm) qm.textContent = '';
+    var retRespMsg = document.getElementById('retornoMsgResp'); if (retRespMsg){ retRespMsg.textContent = ''; retRespMsg.classList.add('hidden'); }
+     var conclChk = document.getElementById('resp_concluida'); if (conclChk) conclChk.checked = false;
+
+  // Zera placeholders de anexos e validação
+  var axA = document.getElementById('resp_anexosAbertura'); if (axA) axA.innerHTML = '—';
+  var axR = document.getElementById('resp_anexosResposta'); if (axR) axR.innerHTML = '—';
+  var axC = document.getElementById('resp_anexosConclusao'); if (axC) axC.innerHTML = '—';
+    ANEXOS_ABERTURA = []; ANEXOS_RESPOSTA = []; ANEXOS_CONCLUSAO = []; ANEXOS_IMPROCEDENTE = [];
+  var vAxR = document.getElementById('val_respAnexosResp'); if (vAxR) vAxR.innerHTML = '—';
+  var vAxC = document.getElementById('val_respAnexosConc'); if (vAxC) vAxC.innerHTML = '—';
+  var vAxRLbl = document.getElementById('val_respAnexosRespLabel'); if (vAxRLbl) vAxRLbl.textContent = 'Evidências de resposta';
+  var vAxCLbl = document.getElementById('val_respAnexosConcLabel'); if (vAxCLbl) vAxCLbl.textContent = 'Evidências de conclusão';
+  var vAxCBox = document.getElementById('val_respAnexosConcBox'); if (vAxCBox) vAxCBox.classList.remove('hidden');
+
+  ['val_dataResposta','val_pq1','val_pq2','val_pq3','val_pq4','val_pq5','val_motivoImprocedente'].forEach(function(id){
+    var el = document.getElementById(id); if (el) el.value = '';
+  });
+  var vs = document.getElementById('val_solucoesList'); if (vs) vs.innerHTML = '';
+  var impRespBox = document.getElementById('val_improcedenteBox'); if (impRespBox) impRespBox.classList.add('hidden');
+  var causaRaizSec = document.getElementById('val_causaRaizSection'); if (causaRaizSec) causaRaizSec.classList.remove('hidden');
+  var valSolTitle = document.getElementById('val_solucoesTitle'); if (valSolTitle) valSolTitle.textContent = 'SOLUÇÃO';
+
+  var rb2 = document.getElementById('retRespBox2'); if (rb2) rb2.classList.add('hidden');
+  var rm2 = document.getElementById('retMotivoResp2'); if (rm2) rm2.value = '';
+  var qm2 = document.getElementById('qualidadeMsgResp2'); if (qm2) qm2.textContent = '';
+  var respMsg = document.getElementById('respMsg'); if (respMsg) respMsg.textContent = '';
+  var respMsgImp = document.getElementById('respMsgImprocedente'); if (respMsgImp) respMsgImp.textContent = '';
+  var impBox = document.getElementById('improcedenteBox'); if (impBox) impBox.classList.add('hidden');
+  var impMotivo = document.getElementById('impMotivo'); if (impMotivo) impMotivo.value = '';
+  var oldImpAnexo = document.getElementById('impAnexo');
+  if (oldImpAnexo) {
+    var newImpAnexo = document.createElement('input');
+    newImpAnexo.id = 'impAnexo';
+    newImpAnexo.type = 'file';
+    if (oldImpAnexo.accept) newImpAnexo.accept = oldImpAnexo.accept;
+    if (oldImpAnexo.className) newImpAnexo.className = oldImpAnexo.className;
+    oldImpAnexo.parentNode.replaceChild(newImpAnexo, oldImpAnexo);
+  }
+
+  ['resp_dataResposta','pq1','pq2','pq3','pq4','pq5'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.value = '';
+    if (el.tagName === 'TEXTAREA') autoResizeTextarea(el);
+  });
+
+  // limpa seleção de arquivos para evitar reenvio involuntário ao reabrir responder/concluir
+  var oldRespEvid = document.getElementById('resp_evid');
+  if (oldRespEvid) {
+    var newRespEvid = document.createElement('input');
+    newRespEvid.id = 'resp_evid';
+    newRespEvid.type = 'file';
+    newRespEvid.multiple = true;
+    if (oldRespEvid.accept) newRespEvid.accept = oldRespEvid.accept;
+    if (oldRespEvid.className) newRespEvid.className = oldRespEvid.className;
+    oldRespEvid.parentNode.replaceChild(newRespEvid, oldRespEvid);
+  }
+
+  var modal = document.getElementById('validacaoConclusaoModal');
+  if (modal) modal.classList.add('hidden');
+  var modalErr = document.getElementById('validacaoConclusaoError');
+  if (modalErr) modalErr.textContent = '';
+  var selModal = document.getElementById('selecionarConclusaoModal');
+  if (selModal) selModal.classList.add('hidden');
+  var selErr = document.getElementById('selecionarConclusaoError');
+  if (selErr) selErr.textContent = '';
+
+  ['btnValidar','btnRetornar','btnEnviarRetorno','btnValidarResp2','btnRetornarResp2','btnEnviarRetornoResp2','btnImprocedente','btnEnviarImprocedente'].forEach(function(id){
+    var el = document.getElementById(id); if (el) { el.dataset.rnc = ''; el.dataset.mode = ''; }
+  });
+
+  var h1 = document.querySelector('#view-responder h1');
+  if (h1) h1.textContent = 'Responder RNC';
+}
+
+function abrirResponder(rnc, ano, mes, devolucaoTipo){
+  RESP_MODE = 'responder';
+  hide('view-home'); hide('view-criar'); hide('view-visualizar'); show('view-responder');
+  prepararPainelDireitoParaResposta();
+  DEV_MODE = devolucaoTipo || null;
+
+  var h1 = document.querySelector('#view-responder h1');
+  if (h1) h1.textContent = 'Responder RNC';
+
+  document.getElementById('respForm').classList.remove('hidden');
+  document.getElementById('resp_dataResposta').value = hojeBR();
+  ['resp_dataResposta'].forEach(function(id){ var el = document.getElementById(id); if (el){ el.readOnly = false; el.classList.remove('readonly'); }});
+  resetSolucoes(); addSlnRow();
+
+  ['pq1','pq2','pq3','pq4','pq5'].forEach(function(id){ var el = document.getElementById(id); if (el){ el.readOnly = false; el.classList.remove('readonly'); } });
+  setSolucoesReadonly(false);
+
+  var btn = document.getElementById('btnSalvarResposta');
+  if (btn) btn.textContent = 'Enviar resposta';
+  var btnImp = document.getElementById('btnImprocedente');
+  if (btnImp){ btnImp.classList.remove('hidden'); btnImp.dataset.rnc = rnc || ''; }
+
+  preencherCamposResponder(rnc, ano, mes);
+}
+
+function abrirConcluir(rnc, ano, mes, devolucaoTipo){
+  RESP_MODE = 'concluir';
+  hide('view-home'); hide('view-criar'); hide('view-visualizar'); show('view-responder');
+  prepararPainelDireitoParaResposta();
+  DEV_MODE = devolucaoTipo || null;
+
+  var h1 = document.querySelector('#view-responder h1');
+  if (h1) h1.textContent = 'Concluir RNC';
+
+  document.getElementById('respForm').classList.remove('hidden');
+
+  ['resp_dataResposta','pq1','pq2','pq3','pq4','pq5'].forEach(function(id){
+    var el = document.getElementById(id); if (el){ el.readOnly = true; el.classList.add('readonly'); }
+  });
+  resetSolucoes();
+  setSolucoesReadonly(true);
+
+  var btn = document.getElementById('btnSalvarResposta');
+  if (btn) btn.textContent = 'Enviar evidência';
+  var btnImp = document.getElementById('btnImprocedente');
+  if (btnImp) btnImp.classList.add('hidden');
+
+  preencherCamposResponder(rnc, ano, mes);
+}
+
+function setSolucoesReadonly(flag){
+  var cont = document.getElementById('solucoesList');
+  if (!cont) return;
+  var rows = cont.querySelectorAll('.grid-sln');
+  for (var i=0;i<rows.length;i++){
+    var ac = rows[i].querySelector('.sln-acao');
+    var rs = rows[i].querySelector('.sln-resp');
+    var pr = rows[i].querySelector('.sln-prazo');
+    if (ac){ ac.readOnly = !!flag; ac.classList.toggle('readonly', !!flag); }
+    if (rs){ rs.readOnly = !!flag; rs.classList.toggle('readonly', !!flag); }
+    if (pr){ pr.readOnly = !!flag; pr.classList.toggle('readonly', !!flag); }
+  }
+}
+
+function abrirValidar(rnc, ano, mes, mode){
+  RESP_MODE = mode || 'validar';
+  hide('view-home'); hide('view-criar'); hide('view-visualizar'); show('view-responder');
+  prepararPainelDireitoParaResposta();
+  var btnImp = document.getElementById('btnImprocedente');
+  if (btnImp) btnImp.classList.add('hidden');
+
+  var h1 = document.querySelector('#view-responder h1');
+  if (mode === 'resposta' || mode === 'conclusao'){
+    if (h1) h1.textContent = (mode === 'conclusao') ? 'Validar conclusão' : 'Validar resposta';
+
+    var bl = document.getElementById('respValResposta');
+    if (bl) bl.classList.remove('hidden');
+
+    var b1 = document.getElementById('btnValidarResp2');
+    var b2 = document.getElementById('btnRetornarResp2');
+    var b3 = document.getElementById('btnEnviarRetornoResp2');
+    if (b1){ b1.dataset.rnc = rnc; b1.dataset.mode = mode; b1.textContent = (mode==='conclusao'?'Validar conclusão':'Validar resposta'); }
+    if (b2){ b2.dataset.rnc = rnc; b2.dataset.mode = mode; b2.textContent = (mode==='conclusao'?'Retornar conclusão':'Retornar resposta'); }
+    if (b3){ b3.dataset.rnc = rnc; b3.dataset.mode = mode; }
+  } else {
+    if (h1) h1.textContent = 'Validar abertura';
+    document.getElementById('respQualidade').classList.remove('hidden');
+    document.getElementById('qualTitle').textContent = 'Validação de abertura';
+    document.getElementById('qualSub').textContent   = 'Confirme a abertura da RNC para envio à área responsável ou retorne com o motivo.';
+    document.getElementById('qualBtns').classList.remove('hidden');
+    document.getElementById('btnValidar').dataset.rnc = rnc;
+    document.getElementById('btnRetornar').dataset.rnc = rnc;
+    document.getElementById('btnEnviarRetorno').dataset.rnc = rnc;
+  }
+
+  preencherCamposResponder(rnc, ano, mes);
+}
+
+function preencherCamposResponder(rnc, ano, mes){
+  beginGlobalLoading();
+  ['resp_rnc','resp_pv','resp_op','resp_origem','resp_fornecedor','resp_responsavel','resp_descricao','resp_motivo','resp_disposicao','resp_descCorrecao','resp_dataAbertura'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (el.tagName==='TEXTAREA') el.value=''; else el.value='';
+  });
+
+  google.script.run
+    .withFailureHandler(function(err){
+      endGlobalLoading();
+      var qp = document.getElementById('qualidadeMsg') || document.getElementById('respMsg');
+      if (qp) qp.textContent = (err && err.message) ? err.message : String(err);
+    })
+    .withSuccessHandler(function(res){
+      endGlobalLoading();
+      var d = res && res.dados ? res.dados : {};
+      var anex = Array.isArray(res.anexos) ? res.anexos : [];
+
+      var retMsgResp = document.getElementById('retornoMsgResp');
+      var etapaRetornoResp = (res && res.retornoEtapa) ? String(res.retornoEtapa).toLowerCase() : '';
+      var isRetornoResp = etapaRetornoResp.indexOf('retorno resposta') === 0 || etapaRetornoResp.indexOf('retorno conclusão') === 0;
+      if (retMsgResp){
+        if (isRetornoResp && res.retornoMsg){
+          retMsgResp.textContent = 'Retorno da Qualidade: ' + res.retornoMsg;
+          retMsgResp.classList.remove('hidden');
+        } else {
+          retMsgResp.textContent = '';
+          retMsgResp.classList.add('hidden');
+        }
+      }
+
+      // Separa anexos por tipo e preenche nos lugares corretos
+      atualizarEstadoAnexos(anex);
+      renderAnexosComAcao('resp_anexosAbertura', ANEXOS_ABERTURA, 'abertura');
+      renderAnexosComAcao('resp_anexosResposta', ANEXOS_RESPOSTA, 'resposta');
+      renderAnexosComAcao('resp_anexosConclusao', ANEXOS_CONCLUSAO, 'conclusao');
+      var isImprocedenteAtual = !!(CURRENT_RESPOSTA && ((CURRENT_RESPOSTA.motivoImprocedente && String(CURRENT_RESPOSTA.motivoImprocedente).trim()) || String(CURRENT_RESPOSTA.tipo || '').toLowerCase() === 'improcedente'));
+      renderValAnexos(isImprocedenteAtual);
+
+      // Dados da abertura
+      document.getElementById('resp_rnc').value = d.rncId || rnc || '';
+      var btnImpLocal = document.getElementById('btnImprocedente');
+      if (btnImpLocal) btnImpLocal.dataset.rnc = d.rncId || rnc || '';
+      document.getElementById('resp_dataAbertura').value = res.dataAbertura || '';
+      document.getElementById('resp_pv').value = d.pv || '';
+      document.getElementById('resp_op').value = d.op || '';
+      document.getElementById('resp_origem').value = d.origem || '';
+      document.getElementById('resp_fornecedor').value = d.fornecedor || '';
+      document.getElementById('resp_responsavel').value = d.responsavel || '';
+      document.getElementById('resp_descricao').value = d.descricao || '';
+      document.getElementById('resp_motivo').value = d.motivo || '';
+      document.getElementById('resp_disposicao').value = d.disposicao || '';
+      document.getElementById('resp_descCorrecao').value = d.descricaoAcaoCorretiva || '';
+      autoResizeTextarea(document.getElementById('resp_descricao'));
+      autoResizeTextarea(document.getElementById('resp_descCorrecao'));
+
+      /* ====== Dados de resposta ====== */
+      var r = d.resposta || null;
+      CURRENT_RESPOSTA = r;
+      var defaultValidacao = { acoesValidadas: [], acoesConcluidas: [], retornoConclusao: '' };
+      CURRENT_VALIDACAO_CONCLUSAO = d && d.validacaoConclusao ? d.validacaoConclusao : defaultValidacao;
+      if (!Array.isArray(CURRENT_VALIDACAO_CONCLUSAO.acoesValidadas)) CURRENT_VALIDACAO_CONCLUSAO.acoesValidadas = [];
+      if (!Array.isArray(CURRENT_VALIDACAO_CONCLUSAO.acoesConcluidas)) CURRENT_VALIDACAO_CONCLUSAO.acoesConcluidas = [];
+      if (typeof CURRENT_VALIDACAO_CONCLUSAO.retornoConclusao !== 'string') CURRENT_VALIDACAO_CONCLUSAO.retornoConclusao = '';
+      if (retMsgResp && CURRENT_VALIDACAO_CONCLUSAO.retornoConclusao && !retMsgResp.textContent){
+        retMsgResp.textContent = 'Retorno da Qualidade: ' + CURRENT_VALIDACAO_CONCLUSAO.retornoConclusao;
+        retMsgResp.classList.remove('hidden');
+      }
+
+      var dtRes = document.getElementById('val_dataResposta');
+      if (dtRes) dtRes.value = r ? (fmtDateOnly(r.dataRespostaIso)||'') : '';
+      var motivoImprocedente = r ? String(r.motivoImprocedente || '').trim() : '';
+      var isImprocedente = !!motivoImprocedente || (r && String(r.tipo || '').toLowerCase() === 'improcedente');
+      renderValAnexos(isImprocedente);   
+      var porquesVal = (r && Array.isArray(r.porques)) ? r.porques : [r && r.pq1, r && r.pq2, r && r.pq3, r && r.pq4, r && r.pq5];
+      ['val_pq1','val_pq2','val_pq3','val_pq4','val_pq5'].forEach(function(id, idx){
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.value = isImprocedente ? '' : (porquesVal[idx] || '');
+        autoResizeTextarea(el);
+      });
+      var contVal = document.getElementById('val_solucoesList');
+      var impValBox = document.getElementById('val_improcedenteBox');
+      var impValTxt = document.getElementById('val_motivoImprocedente');
+      var causaRaizSec = document.getElementById('val_causaRaizSection');
+      var valSolTitle = document.getElementById('val_solucoesTitle');
+      if (impValBox) impValBox.classList.toggle('hidden', !isImprocedente);
+      if (causaRaizSec) causaRaizSec.classList.toggle('hidden', isImprocedente);
+      if (valSolTitle) valSolTitle.textContent = isImprocedente ? 'IMPROCEDÊNCIA' : 'SOLUÇÃO';
+      if (impValTxt) {
+        impValTxt.value = motivoImprocedente || 'Sem motivo informado.';
+        autoResizeTextarea(impValTxt);
+      }
+      if (contVal){
+        contVal.innerHTML = '';
+        if (isImprocedente){
+          contVal.innerHTML = '<div class="muted">Resposta marcada como improcedente.</div>';
+        } else if (r && Array.isArray(r.solucoes) && r.solucoes.length){
+          r.solucoes.forEach(function(s){
+            var row = document.createElement('div');
+            row.className = 'grid-sln';
+            row.innerHTML =
+              '<div><label>Ação proposta</label><textarea class="autoresize" readonly rows="4">'+esc(s.acao||'')+'</textarea></div>'+
+              '<div class="grid-sln-meta">'+
+                '<div><label>Responsável</label><input type="text" readonly value="'+esc(s.responsavel||'')+'"></div>'+
+                '<div><label>Prazo</label><input type="text" readonly value="'+esc(s.prazo||'')+'"></div>'+
+              '</div>';
+            contVal.appendChild(row);
+            autoResizeWithin(row);
+          });
+        } else {
+          contVal.innerHTML = '<div class="muted">—</div>';
+        }
+      }
+
+      if (r) {
+        var inDt = document.getElementById('resp_dataResposta');
+        if (inDt) {
+          var dataTxt = fmtDateOnly(r.dataRespostaIso);
+          if (dataTxt) inDt.value = dataTxt;
+          else if (RESP_MODE === 'responder') inDt.value = inDt.value || hojeBR();
+        }
+
+        var porques = Array.isArray(r.porques) ? r.porques : [r.pq1, r.pq2, r.pq3, r.pq4, r.pq5];
+        ['pq1','pq2','pq3','pq4','pq5'].forEach(function(id, i){
+          var el = document.getElementById(id);
+          if (!el) return;
+          el.value = porques[i] || '';
+          autoResizeTextarea(el);
+        });
+
+        if (RESP_MODE === 'responder') {
+          var impBoxResp = document.getElementById('improcedenteBox');
+          var impTxtResp = document.getElementById('impMotivo');
+          if (impBoxResp) impBoxResp.classList.toggle('hidden', !isImprocedente);
+          if (impTxtResp) {
+            impTxtResp.value = isImprocedente ? (motivoImprocedente || '') : '';
+            autoResizeTextarea(impTxtResp);
+          }
+        }
+
+        var cont = document.getElementById('solucoesList');
+        if (cont) {
+          resetSolucoes();
+          if (Array.isArray(r.solucoes) && r.solucoes.length){
+            r.solucoes.forEach(function(s){
+              addSlnRow();
+              var rows = cont.querySelectorAll('.grid-sln');
+              var rowEl = rows[rows.length-1];
+              if (!rowEl) return;
+              var ac = rowEl.querySelector('.sln-acao');
+              var rs = rowEl.querySelector('.sln-resp');
+              var pr = rowEl.querySelector('.sln-prazo');
+              if (ac) ac.value = s.acao || '';
+              if (rs) rs.value = s.responsavel || '';
+              if (pr) pr.value = s.prazo || '';
+              autoResizeWithin(rowEl);
+            });
+            if (RESP_MODE === 'responder') addSlnRow();
+          } else {
+            addSlnRow();
+          }
+          setSolucoesReadonly(RESP_MODE === 'concluir');
+        }
+      }
+    })
+    .obterRNC(TOKEN, rnc, ano, mes);
+}
+/* ================== CRIAR / CORRIGIR ================== */
+function setCriarSendLock(isLocked){
+  var btnEnviar = document.getElementById('btnEnviar');
+  if (!btnEnviar) return;
+  if (isLocked){
+    btnEnviar.dataset.locked = '1';
+    btnEnviar.disabled = true;
+  } else {
+    delete btnEnviar.dataset.locked;
+    btnEnviar.disabled = false;
+  }
+}
+
+function clearCriarForm(){
+  setCriarSendLock(false);
+  document.getElementById('rncCriar').value = '';
+  document.getElementById('dtAbertura').value = hojeBR();
+  document.getElementById('pv').value = '';
+  document.getElementById('op').value = '';
+  document.getElementById('responsavel').value = '';
+  document.getElementById('origem').value = '';
+  document.getElementById('fornecedor').value = '';
+  document.getElementById('descricao').value = '';
+  document.getElementById('disposicao').value = '';
+  document.getElementById('descCorrecao').value = '';
+  document.getElementById('msgCriar').textContent = '';
+  document.getElementById('motivo').innerHTML = '<option value="">— selecione —</option>';
+    var retBoxCriar = document.getElementById('retornoMsgCriar'); if (retBoxCriar){ retBoxCriar.textContent = ''; retBoxCriar.classList.add('hidden'); }
+    // AJUSTE: reset confiável do campo de anexos
+  var anexoEl = document.getElementById('anexos');
+  if (anexoEl) {
+    try { anexoEl.value = null; } catch(_) {}
+    anexoEl.type = '';   // força recriação interna do input
+    anexoEl.type = 'file';
+  }
+
+  var bx = document.getElementById('criar_evidBox'); if (bx && bx.parentNode) bx.parentNode.removeChild(bx);
+}
+function abrirCriar(forceClear){
+  EDIT_MODE = false; EDIT_RNC_ID=null;
+  document.getElementById('tituloCriar').textContent = 'Criar RNC';
+  document.getElementById('btnEnviar').textContent = 'Enviar';
+  show('view-criar'); hide('view-home'); hide('view-responder'); hide('view-visualizar');
+
+  if (forceClear !== false) clearCriarForm();
+
+  if (!FORNECEDORES_CARREGADOS){
+    google.script.run
+      .withSuccessHandler(function(arr){
+        var sel = document.getElementById('fornecedor');
+        fillSelect(sel, arr, true);
+        sel.onchange = function(){ carregarMotivos(sel.value); };
+        carregarMotivos(sel.value);
+      })
+      .withFailureHandler(function(err){ console.log(err); })
+      .listarFornecedores();
+    FORNECEDORES_CARREGADOS = true;
+  } else {
+    carregarMotivos(document.getElementById('fornecedor').value);
+  }
+
+  // ⚙️ AJUSTE DEFINITIVO: recria o input de anexos para corrigir cliques múltiplos
+  var oldInput = document.getElementById('anexos');
+  if (oldInput) {
+    var newInput = oldInput.cloneNode();
+    newInput.id = 'anexos';
+    oldInput.parentNode.replaceChild(newInput, oldInput);
+  }
+}
+// AJUSTE: garante que o campo de anexos esteja ativo após reexibir a view
+setTimeout(function(){
+  var a = document.getElementById('anexos');
+  if (a) a.disabled = false;
+}, 50);
+
+
+function abrirCorrigir(rnc, ano, mes){
+  beginGlobalLoading();
+  EDIT_MODE = true; EDIT_RNC_ID = rnc; DEV_MODE = 'abertura';
+  document.getElementById('tituloCriar').textContent = 'Corrigir RNC';
+  document.getElementById('btnEnviar').textContent = 'Reenviar';
+  show('view-criar'); hide('view-home'); hide('view-responder'); hide('view-visualizar');
+  document.getElementById('msgCriar').textContent = 'Carregando dados...';
+
+  function ensureFornecedores(callback){
+    if (FORNECEDORES_CARREGADOS) return callback();
+    google.script.run
+      .withFailureHandler(function(err){
+        endGlobalLoading();
+        document.getElementById('msgCriar').textContent = (err && err.message) ? err.message : String(err);
+      })
+      .withSuccessHandler(function(arr){
+        fillSelect(document.getElementById('fornecedor'), arr, true);
+        document.getElementById('fornecedor').onchange = function(){ carregarMotivos(document.getElementById('fornecedor').value); };
+        FORNECEDORES_CARREGADOS = true;
+        callback();
+      })
+      .listarFornecedores();
+  }
+
+  ensureFornecedores(function(){
+    google.script.run
+      .withFailureHandler(function(err){
+        endGlobalLoading();
+        document.getElementById('msgCriar').textContent = (err && err.message) ? err.message : String(err);
+      })
+      .withSuccessHandler(function(res){
+        endGlobalLoading();
+        var d = res && res.dados ? res.dados : {};
+        var anex = Array.isArray(res.anexos) ? res.anexos : [];
+
+        var retBoxCriar = document.getElementById('retornoMsgCriar');
+        var etapaRetorno = (res && res.retornoEtapa) ? String(res.retornoEtapa).toLowerCase() : '';
+        if (retBoxCriar){
+          if (etapaRetorno.indexOf('retorno abertura') === 0 && res.retornoMsg){
+            retBoxCriar.textContent = 'Retorno da Qualidade: ' + res.retornoMsg;
+            retBoxCriar.classList.remove('hidden');
+          } else {
+            retBoxCriar.textContent = '';
+            retBoxCriar.classList.add('hidden');
+          }
+        }
+
+        // anexa evidências de abertura (sem sufixo)
+        atualizarEstadoAnexos(anex);
+        var listEl = ensureCriarEvidenceBox();
+        if (listEl) renderAnexosComAcao('criar_evidList', ANEXOS_ABERTURA, 'abertura');
+
+        document.getElementById('rncCriar').value = rnc || (d.rncId||'');
+        document.getElementById('dtAbertura').value = res.dataAbertura || hojeBR();
+        document.getElementById('pv').value = d.pv || '';
+        document.getElementById('op').value = d.op || '';
+        document.getElementById('responsavel').value = d.responsavel || '';
+        document.getElementById('origem').value = d.origem || '';
+        document.getElementById('fornecedor').value = d.fornecedor || '';
+        document.getElementById('descricao').value = d.descricao || '';
+        document.getElementById('disposicao').value = d.disposicao || '';
+        document.getElementById('descCorrecao').value = d.descricaoAcaoCorretiva || '';
+        autoResizeTextarea(document.getElementById('descricao'));
+        autoResizeTextarea(document.getElementById('descCorrecao'));
+
+        google.script.run
+          .withSuccessHandler(function(arr){
+            fillSelect(document.getElementById('motivo'), arr, true);
+            document.getElementById('motivo').value = d.motivo || '';
+            document.getElementById('msgCriar').textContent = '';
+          })
+          .listarMotivosPorFornecedor(d.fornecedor || '');
+      })
+      .obterRNC(TOKEN, rnc, ano, mes);
+  });
+}
+function sairDeEdicao(){
+  EDIT_MODE=false; EDIT_RNC_ID=null;
+  document.getElementById('tituloCriar').textContent = 'Criar RNC';
+  document.getElementById('btnEnviar').textContent = 'Enviar';
+}
+function carregarMotivos(fornecedor){
+  google.script.run
+    .withSuccessHandler(function(arr){
+      var sel = document.getElementById('motivo');
+      fillSelect(sel, arr, true);
+    })
+    .withFailureHandler(function(err){ console.log(err); })
+    .listarMotivosPorFornecedor(fornecedor || '');
+}
+
+/* ================== Máscaras & autoresize ================== */
+var pvEl = document.getElementById('pv');
+var opEl = document.getElementById('op');
+if (pvEl) pvEl.addEventListener('input', function(){ pvEl.value = pvEl.value.replace(/\D/g,'').slice(0,5); });
+if (opEl) opEl.addEventListener('input', function(){
+  var v = opEl.value.replace(/[^\d/]/g,'').replace(/\/+/g,'/').slice(0,8);
+  opEl.value = v;
+});
+['pq1','pq2','pq3','pq4','pq5','descricao','descCorrecao','resp_descricao','resp_descCorrecao','vis_descricao','vis_descCorrecao','val_pq1','val_pq2','val_pq3','val_pq4','val_pq5','vis_pq1','vis_pq2','vis_pq3','vis_pq4','vis_pq5'].forEach(function(id){
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('input', function(){ autoResizeTextarea(el); });
+  autoResizeTextarea(el);
+});
+
+/* ================== Util: ler arquivos base64 ================== */
+function readFilesAsBase64(files, limitMB){
+  return new Promise(function(resolve){
+    if (!files || !files.length) return resolve([]);
+    var out = [], pending = files.length;
+    for (var i=0;i<files.length;i++){
+      (function(file){
+        if (limitMB && file.size > limitMB*1024*1024){
+          out.push({ error: 'Arquivo acima de '+limitMB+'MB: '+file.name });
+          if (--pending === 0) resolve(out);
+          return;
+        }
+        var fr = new FileReader();
+        fr.onload = function(e){
+          var dataUrl = String(e.target.result || '');
+          var comma = dataUrl.indexOf('base64,');
+          var base64 = comma >= 0 ? dataUrl.substring(comma + 7) : '';
+          out.push({ name:file.name, mimeType:file.type || 'application/octet-stream', dataBase64: base64 });
+          if (--pending === 0) resolve(out);
+        };
+        fr.onerror = function(){ if (--pending === 0) resolve(out); };
+        fr.readAsDataURL(file);
+      })(files[i]);
+    }
+  });
+}
+
+/* ================== Seleção de ações concluídas ================== */
+function abrirSelecaoConclusaoModal(itens, titulo, infoMsg){
+  var modal = document.getElementById('selecionarConclusaoModal');
+  var list = document.getElementById('selecionarConclusaoList');
+  var info = document.getElementById('selecionarConclusaoInfo');
+  var titleEl = document.getElementById('selecionarConclusaoTitulo');
+  var err = document.getElementById('selecionarConclusaoError');
+  if (!modal || !list) return;
+
+  if (titleEl && titulo) titleEl.textContent = titulo;
+  if (info) info.textContent = infoMsg || '';
+  if (err) err.textContent = '';
+  list.innerHTML = '';
+
+  if (!Array.isArray(itens) || !itens.length){
+    list.innerHTML = '<div class="muted">Nenhuma ação disponível.</div>';
+  } else {
+    itens.forEach(function(item, idx){
+      var sol = item && item.solucao ? item.solucao : {};
+      var realIdx = item && typeof item.indice === 'number' ? item.indice : idx;
+      var row = document.createElement('div');
+      row.className = 'pa-validacao-item';
+      var id = 'chk-conc-'+realIdx+'-'+idx;
+
+      var chk = document.createElement('input');
+      chk.type = 'checkbox';
+      chk.id = id;
+      chk.value = String(realIdx);
+      if (item && item.checked) chk.checked = true;
+      if (item && item.disabled) {
+        chk.disabled = true;
+        row.classList.add('pa-validacao-item-disabled');
+      }
+
+      var lbl = document.createElement('label');
+      lbl.setAttribute('for', id);
+      lbl.innerHTML = '<div class="pa-validacao-acao">'+esc(sol.acao || '')+'</div>'+
+                      '<div class="pa-validacao-meta">Responsável: '+esc(sol.responsavel || '-')+' · Prazo: '+esc(sol.prazo || '-')+'</div>';
+
+      row.appendChild(chk);
+      row.appendChild(lbl);
+      list.appendChild(row);
+    });
+  }
+
+  modal.classList.remove('hidden');
+}
+
+function fecharSelecaoConclusaoModal(resultado){
+  var modal = document.getElementById('selecionarConclusaoModal');
+  if (modal) modal.classList.add('hidden');
+  var err = document.getElementById('selecionarConclusaoError');
+  if (err) err.textContent = '';
+  if (typeof selecionarConclusaoResolver === 'function'){
+    selecionarConclusaoResolver(resultado);
+    selecionarConclusaoResolver = null;
+  }
+}
+
+function confirmarSelecaoConclusao(){
+  var list = document.getElementById('selecionarConclusaoList');
+  var err = document.getElementById('selecionarConclusaoError');
+  var selecionadas = [];
+  if (list){
+    Array.prototype.forEach.call(list.querySelectorAll('input[type="checkbox"]'), function(chk){
+      if (chk && chk.checked){
+        var n = parseInt(chk.value, 10);
+        if (!isNaN(n)) selecionadas.push(n);
+      }
+    });
+  }
+  if (!selecionadas.length){
+    if (err) err.textContent = 'Selecione ao menos uma ação concluída.';
+    return;
+  }
+  fecharSelecaoConclusaoModal(selecionadas);
+}
+
+function cancelarSelecaoConclusao(){
+  fecharSelecaoConclusaoModal(null);
+}
+
+function solicitarSelecaoConclusao(itens, titulo, infoMsg){
+  return new Promise(function(resolve){
+    selecionarConclusaoResolver = resolve;
+    abrirSelecaoConclusaoModal(itens, titulo, infoMsg);
+  });
+}
+
+/* ================== CRIAR / CORRIGIR: enviar ================== */
+async function enviarCriar(){
+  var btnEnviar = document.getElementById('btnEnviar');
+  if (btnEnviar && btnEnviar.dataset.locked === '1') return;
+
+  var pv = (document.getElementById('pv').value||'').trim();
+  var op = (document.getElementById('op').value||'').trim();
+  var responsavel = (document.getElementById('responsavel').value||'').trim();
+  var origem = document.getElementById('origem').value;
+  var fornecedor = document.getElementById('fornecedor').value;
+  var descricao = (document.getElementById('descricao').value||'').trim();
+  var motivo = document.getElementById('motivo').value;
+  var disposicao = document.getElementById('disposicao').value;
+  var descCorrecao = (document.getElementById('descCorrecao').value||'').trim();
+  var msg = document.getElementById('msgCriar');
+
+  if (!/^\d{5}$/.test(pv)){ msg.textContent = 'PV inválido: use exatamente 5 dígitos (xxxxx).'; return; }
+  if (!/^(\d{5}|\d{5}\/\d{2})$/.test(op)){ msg.textContent = 'OP inválida: use 5 dígitos ou xxxxx/xx.'; return; }
+  if (!origem){ msg.textContent = 'Selecione a origem da não conformidade.'; return; }
+  if (!fornecedor){ msg.textContent = 'Selecione um Fornecedor.'; return; }
+  if (!responsavel){ msg.textContent = 'Informe o Responsável.'; return; }
+  if (descricao.length < 20){ msg.textContent = 'A descrição deve ter pelo menos 20 caracteres.'; return; }
+  if (!motivo){ msg.textContent = 'Selecione um Motivo.'; return; }
+  if (!disposicao){ msg.textContent = 'Selecione a Disposição (ação imediata).'; return; }
+  if (descCorrecao.length < 10){ msg.textContent = 'A descrição da ação corretiva deve ter pelo menos 10 caracteres.'; return; }
+
+ setCriarSendLock(true);
+
+  var files = document.getElementById('anexos').files;
+  var anexos = await readFilesAsBase64(files);
+  // Abertura: sem sufixo (numeração por duplicidade no Drive é garantida no back-end)
+
+  if (!EDIT_MODE){
+    beginGlobalLoading();
+    google.script.run
+      .withFailureHandler(function(err){
+        endGlobalLoading();
+        setCriarSendLock(false);
+        document.getElementById('msgCriar').textContent = (err && err.message) ? err.message : String(err);
+      })
+      .withSuccessHandler(function(res){
+        endGlobalLoading();
+        setCriarSendLock(false);
+        var html = 'RNC criada: <b>' + res.rncId + '</b> — Fornecedor: ' + res.fornecedor + ' — Motivo: ' + res.motivo + '.';
+        if (res.fileUrl)        html += ' &nbsp;|&nbsp; <a class="link" href="'+res.fileUrl+'" target="_blank">Abrir JSON</a>';
+        if (res.monthFolderUrl) html += ' &nbsp;|&nbsp; <a class="link" href="'+res.monthFolderUrl+'" target="_blank">Pasta do mês</a>';
+        if (res.anexos && res.anexos.length){
+          html += '<br>Anexos: ';
+          for (var i=0;i<res.anexos.length;i++){
+            var a = res.anexos[i];
+            html += (i? ' • ' : '') + '<a class="link" href="'+a.url+'" target="_blank">'+esc(a.name)+'</a>';
+          }
+        }
+        if (res.driveError)     html += '<br><span style="color:#b91c1c">⚠ Drive: ' + res.driveError + '</span>';
+        document.getElementById('msgCriar').innerHTML = html;
+
+        clearCriarForm();
+        hide('view-criar'); show('view-home'); carregarTabelas();
+      })
+      .criarRNC_SalvarBasico(TOKEN, pv, op, '', origem, fornecedor, responsavel, descricao, motivo, disposicao, descCorrecao, anexos);
+  } else {
+    beginGlobalLoading();
+    google.script.run
+      .withFailureHandler(function(err){
+        endGlobalLoading();
+        setCriarSendLock(false);
+        document.getElementById('msgCriar').textContent = (err && err.message) ? err.message : String(err);
+      })
+      .withSuccessHandler(function(res){
+        endGlobalLoading();
+        setCriarSendLock(false);
+        var html = 'RNC <b>' + EDIT_RNC_ID + '</b> reenviada para validação.';
+        if (res.fileUrl)        html += ' &nbsp;|&nbsp; <a class="link" href="'+res.fileUrl+'" target="_blank">Abrir JSON</a>';
+        if (res.monthFolderUrl) html += ' &nbsp;|&nbsp; <a class="link" href="'+res.monthFolderUrl+'" target="_blank">Pasta do mês</a>';
+        if (res.anexos && res.anexos.length){
+          html += '<br>Novos anexos: ';
+          for (var i=0;i<res.anexos.length;i++){
+            var a = res.anexos[i];
+            html += (i? ' • ' : '') + '<a class="link" href="'+a.url+'" target="_blank">'+esc(a.name)+'</a>';
+          }
+        }
+        document.getElementById('msgCriar').innerHTML = html;
+
+        clearCriarForm();
+        sairDeEdicao();
+        hide('view-criar'); show('view-home'); carregarTabelas();
+      })
+      .corrigirRNC_AtualizarAbertura(TOKEN, EDIT_RNC_ID, pv, op, responsavel, origem, fornecedor, descricao, motivo, disposicao, descCorrecao, anexos);
+  }
+}
+
+/* ================== RESPOSTA / CONCLUSÃO – salvar ================== */
+var btnImprocedente = document.getElementById('btnImprocedente');
+if (btnImprocedente) btnImprocedente.onclick = function(){
+  var box = document.getElementById('improcedenteBox');
+  if (box) box.classList.toggle('hidden');
+  var tx = document.getElementById('impMotivo'); if (tx) tx.focus();
+};
+
+var btnEnviarImprocedente = document.getElementById('btnEnviarImprocedente');
+if (btnEnviarImprocedente) btnEnviarImprocedente.onclick = function(){
+  (async function(){
+  var rnc = (document.getElementById('btnImprocedente') && document.getElementById('btnImprocedente').dataset.rnc) || document.getElementById('resp_rnc').value;
+  var motivo = (document.getElementById('impMotivo').value || '').trim();
+  var anexoInput = document.getElementById('impAnexo');
+  var files = (anexoInput && anexoInput.files) ? anexoInput.files : [];
+  if (!rnc) return;
+  if (motivo.length < 15){
+    document.getElementById('respMsgImprocedente').textContent = 'Informe o motivo com ao menos 15 caracteres.';
+    return;
+  }
+
+  var anexos = [];
+  if (files && files.length){
+    anexos = await readFilesAsBase64(files, 10);
+  }
+
+  beginGlobalLoading();
+  google.script.run
+    .withFailureHandler(function(err){
+      endGlobalLoading();
+      document.getElementById('respMsgImprocedente').textContent = (err && err.message) ? err.message : String(err);
+    })
+    .withSuccessHandler(function(){
+      endGlobalLoading();
+      document.getElementById('respMsgImprocedente').textContent = 'Improcedente enviada. Aguardando validação da Qualidade.';
+      setTimeout(function(){ hide('view-responder'); show('view-home'); carregarTabelas(); }, 800);
+    })
+    .responderRNC_Improcedente(TOKEN, rnc, motivo, anexos);
+  })().catch(function(err){
+    endGlobalLoading();
+    document.getElementById('respMsgImprocedente').textContent = (err && err.message) ? err.message : String(err);
+  });
+};
+
+document.getElementById('btnSalvarResposta').onclick = async function(){
+  var setRespMsg = function(msg){
+    var el = document.getElementById('respMsg');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.classList.remove('hidden');
+    el.style.display = 'inline';
+  };
+  if (RESP_MODE === 'concluir'){
+    var rnc = document.getElementById('resp_rnc').value;
+    var conclChk = document.getElementById('resp_concluida');
+    var files = document.getElementById('resp_evid').files;
+    var solucoesConc = getSolucoesAtuais();
+    var validadasConc = new Set(getAcoesValidadasAtuais().filter(function(idx){ return idx >= 0 && (!Array.isArray(solucoesConc) || idx < solucoesConc.length); }));
+    var concluidasPrevias = new Set(getAcoesConcluidasAtuais().filter(function(idx){ return idx >= 0 && (!Array.isArray(solucoesConc) || idx < solucoesConc.length); }));
+    var totalNaoValidadas = Array.isArray(solucoesConc) ? Math.max(0, solucoesConc.length - validadasConc.size) : 0;
+    var acoesConcluidasConc = [];
+    var temNovosArquivos = files && files.length > 0;
+    var possuiConcExistente = Array.isArray(ANEXOS_CONCLUSAO) && ANEXOS_CONCLUSAO.length > 0;
+
+    if (!Array.isArray(solucoesConc) || !solucoesConc.length){
+      setRespMsg('Nenhum plano de ação disponível para conclusão.');
+      return;
+    }
+
+    if ((!conclChk || !conclChk.checked) && !possuiConcExistente && !temNovosArquivos){
+      setRespMsg('Para concluir a RNC, marque o checkbox e anexe ao menos uma evidência.');
+      return;
+    }
+    if (!conclChk || !conclChk.checked){
+      setRespMsg('Para concluir a RNC, marque o checkbox "Ações já foram concluídas".');
+      return;
+    }
+    if (!possuiConcExistente && !temNovosArquivos){
+      setRespMsg('Para concluir a RNC, anexe ao menos um arquivo de evidência.');
+      return;
+    }
+    if (temNovosArquivos){
+      for (var i=0;i<files.length;i++){
+        if (files[i].size > 10*1024*1024){
+          setRespMsg('Arquivo acima de 10MB: ' + files[i].name);
+          return;
+        }
+      }
+    }
+      var anexos = temNovosArquivos ? await readFilesAsBase64(files, 10) : [];
+      if (temNovosArquivos){
+        // Conclusão: - conc + numeração
+        anexos = anexos.map(function(a, idx){
+          if (!a || !a.dataBase64) return a;
+        var ext = '', n = a.name || '', p = n.lastIndexOf('.');
+        if (p > 0) ext = n.substring(p);
+        var num = (idx === 0) ? '' : ' ('+(idx+1)+')';
+        a.name = (rnc || 'RNC') + ' - conc' + num + ext;
+        return a;
+      });
+    }
+
+    var itensSelecaoConc = Array.isArray(solucoesConc) ? solucoesConc.map(function(sol, idx){
+      var jaValidada = validadasConc.has(idx);
+      var jaConcluida = concluidasPrevias.has(idx);
+      return {
+        indice: idx,
+        solucao: sol,
+        checked: jaValidada || jaConcluida || totalNaoValidadas === 1,
+        disabled: jaValidada
+      };
+    }) : [];
+
+    var selecionadasConc = await solicitarSelecaoConclusao(itensSelecaoConc, 'Selecione as ações concluídas', 'Marque os planos concluídos. Planos já validados estão bloqueados.');
+    if (!selecionadasConc){
+      setRespMsg('Envio cancelado.');
+      return;
+    }
+
+    acoesConcluidasConc = selecionadasConc.filter(function(idx){ return !validadasConc.has(idx); });
+
+    if (totalNaoValidadas > 0 && !acoesConcluidasConc.length){
+      setRespMsg('Selecione ao menos um plano de ação não validado.');
+      return;
+    }
+
+    beginGlobalLoading();
+    google.script.run
+      .withFailureHandler(function(err){
+        endGlobalLoading();
+        setRespMsg((err && err.message) ? err.message : String(err));
+      })
+      .withSuccessHandler(function(){
+        endGlobalLoading();
+        setRespMsg('Evidência enviada. Aguardando validação da Qualidade.');
+        setTimeout(function(){ hide('view-responder'); show('view-home'); carregarTabelas(); }, 800);
+      })
+      .concluirRNC_EnviarEvidencias(TOKEN, rnc, anexos, acoesConcluidasConc);
+    return;
+  }
+
+  // RESPOSTA normal: - resp
+  var rnc = document.getElementById('resp_rnc').value;
+  var pq1 = (document.getElementById('pq1').value||'').trim();
+  var pq2 = (document.getElementById('pq2').value||'').trim();
+  var pq3 = (document.getElementById('pq3').value||'').trim();
+  var pq4 = (document.getElementById('pq4').value||'').trim();
+  var pq5 = (document.getElementById('pq5').value||'').trim();
+  var concluida = !!(document.getElementById('resp_concluida') && document.getElementById('resp_concluida').checked);
+
+  if (pq1.length < 10){
+     setRespMsg('Informe o 1º Porquê com ao menos 10 caracteres.');
+    return;
+  }
+  if (pq2.length < 10){
+    setRespMsg('Informe o 2º Porquê com ao menos 10 caracteres.');
+    return;
+  }
+  if (pq3.length < 10){
+    setRespMsg('Informe o 3º Porquê com ao menos 10 caracteres.');
+    return;
+  }
+
+  var cont = document.getElementById('solucoesList');
+  var rows = cont ? cont.querySelectorAll('.grid-sln') : [];
+  var solucoes = [];
+  var possuiPlano = false;
+  for (var i=0;i<rows.length;i++){
+    var ac = rows[i].querySelector('.sln-acao').value.trim();
+    var rs = rows[i].querySelector('.sln-resp').value.trim();
+    var pr = rows[i].querySelector('.sln-prazo').value.trim();
+    if (!ac && !rs && !pr) continue;
+        possuiPlano = true;
+    if (ac.length < 10){
+      setRespMsg('A ação proposta na linha '+(i+1)+' deve ter ao menos 10 caracteres.');
+      return;
+    }
+    if (!rs){
+      setRespMsg('Informe o responsável na linha '+(i+1)+'.');
+      return;
+    }
+    if (!pr){
+      setRespMsg('Informe o prazo na linha '+(i+1)+' no formato dd/mm/aaaa.');
+      return;
+    }
+    if (!isValidDateBR(pr)){
+      setRespMsg('Prazo inválido na linha '+(i+1)+'. Use dd/mm/aaaa.');
+      return;
+    }
+    solucoes.push({ acao: ac, responsavel: rs, prazo: pr });
+  }
+
+  if (!possuiPlano){
+    setRespMsg('Informe ao menos uma ação proposta com responsável e prazo.');
+    return;
+  }
+
+  var files = document.getElementById('resp_evid').files;
+  if (concluida && (!files || !files.length)){
+    setRespMsg('Para marcar as ações como concluídas, anexe uma evidência.');
+    return;
+  }
+  if (!concluida && files && files.length){
+    setRespMsg('Para enviar evidência de conclusão, marque o checkbox "Ações já foram concluídas".');
+    return;
+  }
+  for (var i=0;i<files.length;i++){
+    if (files[i].size > 10*1024*1024){
+      setRespMsg('Arquivo acima de 10MB: ' + files[i].name);
+      return;
+    }
+  }
+  var anexos = await readFilesAsBase64(files, 10);
+  var temEvidencia = files && files.length > 0;
+  var marcarConclusao = concluida && temEvidencia;
+  var acoesConcluidasResp = [];
+  if (marcarConclusao){
+    if (solucoes.length > 1){
+      var itensSelecaoResp = solucoes.map(function(s, idx){ return { indice: idx, solucao: s }; });
+      var selecionadasResp = await solicitarSelecaoConclusao(itensSelecaoResp, 'Selecione as ações concluídas', 'Marque quais planos de ação já estão concluídos.');
+      if (!selecionadasResp){
+        setRespMsg('Envio cancelado.');
+        return;
+      }
+      acoesConcluidasResp = selecionadasResp;
+    } else {
+      acoesConcluidasResp = [0];
+    }
+
+    if (!acoesConcluidasResp.length){
+      setRespMsg('Selecione quais ações foram concluídas.');
+      return;
+    }
+  }
+  // RESPOSTA: só envia como conclusão (- conc) quando houver checkbox marcada e evidência
+  anexos = anexos.map(function(a, idx){
+    if (!a || !a.dataBase64) return a;
+    var ext = '', n = a.name || '', p = n.lastIndexOf('.');
+    if (p > 0) ext = n.substring(p);
+    var num = (idx === 0) ? '' : ' ('+(idx+1)+')';
+    var sufixo = marcarConclusao ? ' - conc' : ' - resp';
+    a.name = (rnc || 'RNC') + sufixo + num + ext;
+    return a;
+  });
+
+  beginGlobalLoading();
+  google.script.run
+    .withFailureHandler(function(err){
+      endGlobalLoading();
+      setRespMsg((err && err.message) ? err.message : String(err));
+    })
+    .withSuccessHandler(function(){
+      endGlobalLoading();
+      setRespMsg('Resposta enviada. Aguardando validação da Qualidade.');
+      setTimeout(function(){ hide('view-responder'); show('view-home'); carregarTabelas(); }, 800);
+    })
+    .responderRNC_Salvar(TOKEN, rnc, { pq1:pq1, pq2:pq2, pq3:pq3, pq4:pq4, pq5:pq5, solucoes:solucoes, validarConclusao:marcarConclusao, acoesConcluidas: acoesConcluidasResp }, anexos, marcarConclusao);
+};
+
+/* ================== QUALIDADE – Validações ================== */
+document.getElementById('btnValidar').onclick = function(){
+  var rnc = this.dataset.rnc || document.getElementById('resp_rnc').value;
+  if (!rnc) return;
+  beginGlobalLoading();
+  google.script.run
+    .withFailureHandler(function(err){
+      endGlobalLoading();
+      document.getElementById('qualidadeMsg').textContent = (err && err.message) ? err.message : String(err);
+    })
+    .withSuccessHandler(function(){
+      endGlobalLoading();
+      document.getElementById('qualidadeMsg').textContent = 'RNC validada com sucesso.';
+      setTimeout(function(){ hide('view-responder'); show('view-home'); carregarTabelas(); }, 600);
+    })
+    .validarAbertura(TOKEN, rnc);
+};
+document.getElementById('btnRetornar').onclick = function(){
+  var box = document.getElementById('retornoBox');
+  box.classList.toggle('hidden');
+  document.getElementById('retMotivo').focus();
+};
+document.getElementById('btnEnviarRetorno').onclick = function(){
+  var rnc = this.dataset.rnc || document.getElementById('resp_rnc').value;
+  var motivo = (document.getElementById('retMotivo').value||'').trim();
+  if (!rnc) return;
+  if (!motivo){ alert('Informe um motivo válido.'); return; }
+
+  beginGlobalLoading();
+  google.script.run
+    .withFailureHandler(function(err){
+      endGlobalLoading();
+      document.getElementById('qualidadeMsg').textContent = (err && err.message) ? err.message : String(err);
+    })
+    .withSuccessHandler(function(){
+      endGlobalLoading();
+      document.getElementById('qualidadeMsg').textContent = 'Motivo registrado e RNC devolvida para correção.';
+      setTimeout(function(){ hide('view-responder'); show('view-home'); carregarTabelas(); }, 600);
+    })
+    .retornarRNC(TOKEN, rnc, motivo);
+};
+
+// ====== Validação da RESPOSTA / CONCLUSÃO ======
+function getIndicesConcluidosPendentes(){
+  var solucoes = getSolucoesAtuais();
+  var validadas = new Set(getAcoesValidadasAtuais().filter(function(idx){ return idx >= 0 && (!Array.isArray(solucoes) || idx < solucoes.length); }));
+  var concluidas = new Set(getAcoesConcluidasAtuais().filter(function(idx){ return idx >= 0 && (!Array.isArray(solucoes) || idx < solucoes.length); }));
+  var pendentes = [];
+
+  concluidas.forEach(function(idx){
+    if (!validadas.has(idx)) pendentes.push(idx);
+  });
+
+  return pendentes;
+}
+
+function abrirModalValidacaoConclusao(){
+  var modal = document.getElementById('validacaoConclusaoModal');
+  var list = document.getElementById('validacaoConclusaoList');
+  var info = document.getElementById('validacaoConclusaoInfo');
+  var err = document.getElementById('validacaoConclusaoError');
+  var retornoWrap = document.getElementById('validacaoConclusaoRetornoWrap');
+  var retornoField = document.getElementById('validacaoConclusaoRetorno');
+  if (!modal) return;
+  if (err) err.textContent = '';
+  if (retornoField) retornoField.value = '';
+
+  var solucoes = getSolucoesAtuais();
+  var concluidasPendentes = getIndicesConcluidosPendentes();
+  var validadasSet = new Set(getAcoesValidadasAtuais().filter(function(idx){ return idx >= 0 && (!Array.isArray(solucoes) || idx < solucoes.length); }));
+  var pendentesSet = new Set(concluidasPendentes);
+
+  if (info) {
+    var baseMsg = concluidasPendentes.length ? 'Selecione as ações concluídas que serão validadas.' : 'Nenhuma ação marcada como concluída para validação.';
+    info.textContent = baseMsg;
+  }
+
+  if (list) {
+    list.innerHTML = '';
+    list.dataset.totalConcluidas = concluidasPendentes.length || 0;
+    if (!Array.isArray(solucoes) || !solucoes.length) {
+      list.innerHTML = '<div class="muted">Nenhum plano de ação cadastrado.</div>';
+    } else {
+      solucoes.forEach(function(s, idx){
+        var row = document.createElement('div');
+        row.className = 'pa-validacao-item';
+        var id = 'chk-validacao-'+idx;
+
+        var chk = document.createElement('input');
+        chk.type = 'checkbox';
+        chk.id = id;
+        chk.value = String(idx);
+
+        var statusText = '';
+        var statusClass = 'pa-validacao-status';
+
+        if (validadasSet.has(idx)) {
+          chk.checked = true;
+          chk.disabled = true;
+          row.classList.add('pa-validacao-item-disabled');
+          statusText = 'Plano já validado';
+          statusClass += ' pa-validacao-status-ok';
+        } else if (pendentesSet.has(idx)) {
+          chk.addEventListener('change', atualizarCampoRetornoValidacao);
+          statusText = 'Disponível para validação';
+          statusClass += ' pa-validacao-status-pendente';
+        } else {
+          chk.disabled = true;
+          row.classList.add('pa-validacao-item-disabled');
+          statusText = 'Aguardando conclusão';
+        }
+
+        var lbl = document.createElement('label');
+        lbl.setAttribute('for', id);
+        lbl.innerHTML = '<div class="pa-validacao-acao">'+esc(s && s.acao || '')+'</div>'+
+                        '<div class="pa-validacao-meta">Responsável: '+esc(s && s.responsavel || '-')+' · Prazo: '+esc(s && s.prazo || '-')+'</div>'+
+                        '<div class="'+statusClass+'">'+statusText+'</div>';
+
+        row.appendChild(chk);
+        row.appendChild(lbl);
+        list.appendChild(row);
+      });
+    }
+  }
+
+  if (retornoWrap) retornoWrap.classList.toggle('hidden', concluidasPendentes.length === 0);
+  atualizarCampoRetornoValidacao();
+  modal.classList.remove('hidden');
+}
+
+function fecharModalValidacaoConclusao(){
+  var modal = document.getElementById('validacaoConclusaoModal');
+  if (modal) modal.classList.add('hidden');
+  var err = document.getElementById('validacaoConclusaoError');
+  if (err) err.textContent = '';
+}
+
+function atualizarCampoRetornoValidacao(){
+  var list = document.getElementById('validacaoConclusaoList');
+  var wrap = document.getElementById('validacaoConclusaoRetornoWrap');
+  if (!list || !wrap) return;
+  var total = parseInt(list.dataset.totalConcluidas || '0', 10) || 0;
+  var marcadas = 0;
+  Array.prototype.forEach.call(list.querySelectorAll('input[type="checkbox"]'), function(chk){
+    if (chk && !chk.disabled && chk.checked) marcadas++;
+  });
+  var deveEsconder = total > 0 && marcadas >= total;
+  wrap.classList.toggle('hidden', deveEsconder || total === 0);
+}
+
+function validarConclusaoComSelecao(selecionadas, retornoMsg){
+  var rnc  = (document.getElementById('btnValidarResp2') && document.getElementById('btnValidarResp2').dataset.rnc) || document.getElementById('resp_rnc').value;
+  var msgEl = document.getElementById('qualidadeMsgResp2');
+  if (!rnc) return;
+
+  beginGlobalLoading();
+  google.script.run
+    .withFailureHandler(function(err){
+      endGlobalLoading();
+      if (msgEl) msgEl.textContent = (err && err.message) ? err.message : String(err);
+    })
+    .withSuccessHandler(function(res){
+      endGlobalLoading();
+      if (msgEl) {
+        msgEl.textContent = (res && res.etapa === 'Aguardando conclusão') ? 'Ações validadas. Próximo plano registrado.' : 'Conclusão validada.';
+      }
+      setTimeout(function(){ hide('view-responder'); show('view-home'); carregarTabelas(); }, 700);
+    })
+    .validarConclusao(TOKEN, rnc, Array.isArray(selecionadas) ? selecionadas : [], retornoMsg || '');
+}
+
+function confirmarValidacaoConclusao(){
+  var list = document.getElementById('validacaoConclusaoList');
+  var err = document.getElementById('validacaoConclusaoError');
+  var retornoField = document.getElementById('validacaoConclusaoRetorno');
+  var totalConcluidas = parseInt(list && list.dataset ? list.dataset.totalConcluidas || '0' : '0', 10) || 0;
+  var selecionadas = [];
+  if (list){
+    Array.prototype.forEach.call(list.querySelectorAll('input[type="checkbox"]'), function(chk){
+      if (chk && !chk.disabled && chk.checked){
+        var n = parseInt(chk.value, 10);
+        if (!isNaN(n)) selecionadas.push(n);
+      }
+    });
+  }
+
+  if (totalConcluidas > 0 && !selecionadas.length){
+    if (err) err.textContent = 'Selecione ao menos uma ação para validar.';
+    return;
+  }
+
+  var retornoMsg = retornoField ? (retornoField.value || '').trim() : '';
+  if (totalConcluidas > 0 && selecionadas.length < totalConcluidas && !retornoMsg){
+    if (err) err.textContent = 'Descreva os pontos pendentes para os planos não validados.';
+    return;
+  }
+
+  fecharModalValidacaoConclusao();
+  validarConclusaoComSelecao(selecionadas, retornoMsg);
+}
+
+var btnValidarResp2 = document.getElementById('btnValidarResp2');
+if (btnValidarResp2) btnValidarResp2.onclick = function(){
+  var rnc  = this.dataset.rnc  || document.getElementById('resp_rnc').value;
+  var mode = this.dataset.mode || 'resposta';
+  if (!rnc) return;
+
+  var msgEl = document.getElementById('qualidadeMsgResp2');
+  if (mode !== 'conclusao') beginGlobalLoading();
+
+  if (mode === 'conclusao'){
+    var concluidasPendentes = getIndicesConcluidosPendentes();
+
+    if (!concluidasPendentes.length){
+      if (msgEl) msgEl.textContent = 'Nenhuma ação marcada como concluída para validar.';
+      return;
+    }
+
+    abrirModalValidacaoConclusao();
+    return;
+  }
+
+  var runner = google.script.run
+    .withFailureHandler(function(err){
+      endGlobalLoading();
+      if (msgEl) msgEl.textContent = (err && err.message) ? err.message : String(err);
+    })
+    .withSuccessHandler(function(){
+      endGlobalLoading();
+      if (msgEl) msgEl.textContent = 'Resposta validada.';
+      setTimeout(function(){ hide('view-responder'); show('view-home'); carregarTabelas(); }, 700);
+    });
+
+  runner.validarResposta(TOKEN, rnc);
+};
+
+var btnRetornarResp2 = document.getElementById('btnRetornarResp2');
+if (btnRetornarResp2) btnRetornarResp2.onclick = function(){
+  var box = document.getElementById('retRespBox2');
+  if (box){ box.classList.toggle('hidden'); }
+  var tx = document.getElementById('retMotivoResp2'); if (tx) tx.focus();
+};
+
+var btnEnviarRetornoResp2 = document.getElementById('btnEnviarRetornoResp2');
+if (btnEnviarRetornoResp2) btnEnviarRetornoResp2.onclick = function(){
+  var rnc  = this.dataset.rnc  || document.getElementById('resp_rnc').value;
+  var mode = this.dataset.mode || 'resposta';
+  var motivo = (document.getElementById('retMotivoResp2').value||'').trim();
+  if (!rnc) return;
+  if (!motivo){ alert('Informe um motivo válido.'); return; }
+
+  var msgEl = document.getElementById('qualidadeMsgResp2');
+  beginGlobalLoading();
+
+  var runner = google.script.run
+    .withFailureHandler(function(err){
+      endGlobalLoading();
+      msgEl.textContent = (err && err.message) ? err.message : String(err);
+    })
+    .withSuccessHandler(function(){
+      endGlobalLoading();
+      msgEl.textContent = 'Motivo registrado.';
+      setTimeout(function(){ hide('view-responder'); show('view-home'); carregarTabelas(); }, 700);
+    });
+
+  if (mode === 'conclusao') runner.retornarConclusao(TOKEN, rnc, motivo);
+  else                      runner.retornarResposta(TOKEN, rnc, motivo);
+};
+
+var btnFecharValidacaoConclusao = document.getElementById('btnFecharValidacaoConclusao');
+if (btnFecharValidacaoConclusao) btnFecharValidacaoConclusao.onclick = fecharModalValidacaoConclusao;
+
+var btnCancelarValidacaoConclusao = document.getElementById('btnCancelarValidacaoConclusao');
+if (btnCancelarValidacaoConclusao) btnCancelarValidacaoConclusao.onclick = fecharModalValidacaoConclusao;
+
+var btnConfirmarValidacaoConclusao = document.getElementById('btnConfirmarValidacaoConclusao');
+if (btnConfirmarValidacaoConclusao) btnConfirmarValidacaoConclusao.onclick = confirmarValidacaoConclusao;
+
+var btnFecharSelecaoConclusao = document.getElementById('btnFecharSelecaoConclusao');
+if (btnFecharSelecaoConclusao) btnFecharSelecaoConclusao.onclick = cancelarSelecaoConclusao;
+
+var btnCancelarSelecaoConclusao = document.getElementById('btnCancelarSelecaoConclusao');
+if (btnCancelarSelecaoConclusao) btnCancelarSelecaoConclusao.onclick = cancelarSelecaoConclusao;
+
+var btnConfirmarSelecaoConclusao = document.getElementById('btnConfirmarSelecaoConclusao');
+if (btnConfirmarSelecaoConclusao) btnConfirmarSelecaoConclusao.onclick = confirmarSelecaoConclusao;
+
+/* ================== VISUALIZAR ================== */
+function abrirVisualizar(rnc, ano, mes){
+  beginGlobalLoading();
+  hide('view-home'); hide('view-criar'); hide('view-responder'); show('view-visualizar');
+  var splitEl = document.querySelector('#view-visualizar .split');
+  if (splitEl) splitEl.classList.add('print-left-only');
+
+  // Limpa campos
+  ['vis_rnc','vis_pv','vis_op','vis_origem','vis_fornecedor','vis_responsavel','vis_descricao','vis_motivo','vis_disposicao','vis_descCorrecao','vis_dataAbertura','vis_dataResposta','vis_pq1','vis_pq2','vis_pq3','vis_pq4','vis_pq5'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (el.tagName==='TEXTAREA') el.value=''; else el.value='';
+  });
+  document.getElementById('vis_aberturaAnexos').innerHTML = '—';
+  var body = document.getElementById('visRespBody'); if (body) body.classList.add('hidden');
+  var empty = document.getElementById('visRespEmpty'); if (empty) empty.classList.remove('hidden');
+  var slCont = document.getElementById('vis_solucoesList'); if (slCont) slCont.innerHTML = '';
+  var respAx = document.getElementById('vis_respAnexosResposta'); if (respAx) respAx.innerHTML = '—';
+  var concAx = document.getElementById('vis_respAnexosConclusao'); if (concAx) concAx.innerHTML = '—';
+  var respAxLbl = document.getElementById('vis_respAnexosRespostaLabel'); if (respAxLbl) respAxLbl.textContent = 'Evidências de resposta';
+  var concAxLbl = document.getElementById('vis_respAnexosConclusaoLabel'); if (concAxLbl) concAxLbl.textContent = 'Evidências de conclusão';
+  var concAxBox = document.getElementById('vis_respAnexosConclusaoBox'); if (concAxBox) concAxBox.classList.remove('hidden');
+  var visImpBox = document.getElementById('vis_improcedenteBox'); if (visImpBox) visImpBox.classList.add('hidden');
+  var visImpTxt = document.getElementById('vis_motivoImprocedente'); if (visImpTxt) visImpTxt.value = '';
+  var visCausaSec = document.getElementById('vis_causaRaizSection'); if (visCausaSec) visCausaSec.classList.remove('hidden');
+  var visSolTitle = document.getElementById('vis_solucoesTitle'); if (visSolTitle) visSolTitle.textContent = 'SOLUÇÃO';
+  
+  google.script.run
+    .withFailureHandler(function(err){
+      endGlobalLoading();
+      var ax = document.getElementById('vis_aberturaAnexos');
+      if (ax) ax.textContent = (err && err.message) ? err.message : String(err);
+    })
+    .withSuccessHandler(function(res){
+      endGlobalLoading();
+      var d = res && res.dados ? res.dados : {};
+      var anex = Array.isArray(res.anexos) ? res.anexos : [];
+
+      // Separa anexos
+      var partes = splitAnexosPorTipo(anex);
+      var abert = partes.abertura;
+      var respA = partes.resposta;
+      var concA = partes.conclusao;
+      var improcA = partes.improcedente;
+
+      // Render evidências
+      document.getElementById('vis_aberturaAnexos').innerHTML = renderLinks(abert);
+      document.getElementById('vis_respAnexosResposta').innerHTML = renderLinks(respA);
+      document.getElementById('vis_respAnexosConclusao').innerHTML = renderLinks(concA);
+
+      // Bloco de abertura
+      document.getElementById('vis_rnc').value = d.rncId || rnc || '';
+      document.getElementById('vis_dataAbertura').value = res.dataAbertura || '';
+      document.getElementById('vis_pv').value = d.pv || '';
+      document.getElementById('vis_op').value = d.op || '';
+      document.getElementById('vis_origem').value = d.origem || '';
+      document.getElementById('vis_fornecedor').value = d.fornecedor || '';
+      document.getElementById('vis_responsavel').value = d.responsavel || '';
+      document.getElementById('vis_descricao').value = d.descricao || '';
+      document.getElementById('vis_motivo').value = d.motivo || '';
+      document.getElementById('vis_disposicao').value = d.disposicao || '';
+      document.getElementById('vis_descCorrecao').value = d.descricaoAcaoCorretiva || '';
+      autoResizeTextarea(document.getElementById('vis_descricao'));
+      autoResizeTextarea(document.getElementById('vis_descCorrecao'));
+
+      // Bloco de resposta (exibe apenas se houver)
+      var r = d.resposta || null;
+      if (splitEl) splitEl.classList.toggle('print-left-only', !r);
+      if (r){
+        if (body) body.classList.remove('hidden');
+        if (empty) empty.classList.add('hidden');
+
+        document.getElementById('vis_dataResposta').value = fmtDateOnly(r.dataRespostaIso) || '';
+
+        var motivoImprocedente = String(r.motivoImprocedente || '').trim();
+        var isImprocedente = !!motivoImprocedente || String(r.tipo || '').toLowerCase() === 'improcedente';
+        if (respAxLbl) respAxLbl.textContent = isImprocedente ? 'Evidências de improcedência' : 'Evidências de resposta';
+        if (concAxBox) concAxBox.classList.toggle('hidden', isImprocedente);
+        if (respAx) respAx.innerHTML = renderLinks(isImprocedente ? improcA : respA);
+        if (concAx) concAx.innerHTML = renderLinks(concA);
+        if (visImpBox) visImpBox.classList.toggle('hidden', !isImprocedente);
+        if (visCausaSec) visCausaSec.classList.toggle('hidden', isImprocedente);
+        if (visSolTitle) visSolTitle.textContent = isImprocedente ? 'IMPROCEDÊNCIA' : 'SOLUÇÃO';
+        if (visImpTxt) {
+          visImpTxt.value = motivoImprocedente || 'Sem motivo informado.';
+          autoResizeTextarea(visImpTxt);
+        }
+
+        var porques = Array.isArray(r.porques) ? r.porques : [r.pq1, r.pq2, r.pq3, r.pq4, r.pq5];
+        ['vis_pq1','vis_pq2','vis_pq3','vis_pq4','vis_pq5'].forEach(function(id, i){
+          var el = document.getElementById(id); if (el) { el.value = isImprocedente ? '' : (porques[i] || ''); autoResizeTextarea(el); }
+        });
+
+        var c = document.getElementById('vis_solucoesList');
+        if (c){
+          c.innerHTML = '';
+          if (isImprocedente){
+            c.innerHTML = '<div class="muted">Resposta marcada como improcedente.</div>';
+          } else if (Array.isArray(r.solucoes) && r.solucoes.length){
+            r.solucoes.forEach(function(s){
+              var row = document.createElement('div');
+              row.className = 'grid-sln';
+              row.innerHTML =
+                '<div><label>Ação proposta</label><textarea class="autoresize" readonly rows="4">'+esc(s.acao||'')+'</textarea></div>'+
+                '<div class="grid-sln-meta">'+
+                  '<div><label>Responsável</label><input type="text" readonly value="'+esc(s.responsavel||'')+'"></div>'+
+                  '<div><label>Prazo</label><input type="text" readonly value="'+esc(s.prazo||'')+'"></div>'+
+                '</div>';
+              c.appendChild(row);
+              autoResizeWithin(row);
+            });
+          } else {
+            c.innerHTML = '<div class="muted">—</div>';
+          }
+        }
+
+        // força Porquês empilhados
+        forceStackedVisPorques();
+      } else {
+        if (body) body.classList.add('hidden');
+        if (empty) empty.classList.remove('hidden');
+      }
+    })
+    .obterRNC(TOKEN, rnc, ano, mes);
+}
+
+/* ================== Linhas dinâmicas de Soluções ================== */
+function resetSolucoes(){
+  var c = document.getElementById('solucoesList');
+  if (c) c.innerHTML = '';
+}
+
+function addSlnRow(){
+  var c = document.getElementById('solucoesList');
+  if (!c) return;
+
+  var row = document.createElement('div');
+  row.className = 'grid-sln';
+
+  row.innerHTML =
+    '<div><label>Ação proposta</label><textarea class="sln-acao autoresize" rows="4" placeholder="Descreva a ação"></textarea></div>'+
+    '<div class="grid-sln-meta">'+
+      '<div><label>Responsável</label><input type="text" class="sln-resp" placeholder="Nome"></div>'+
+      '<div><label>Prazo</label><input type="text" class="sln-prazo" placeholder="dd/mm/aaaa"></div>'+
+    '</div>';
+
+  c.appendChild(row);
+
+  var ac = row.querySelector('.sln-acao');
+  var pr = row.querySelector('.sln-prazo');
+
+  if (ac){
+    autoResizeTextarea(ac);
+    ac.addEventListener('input', function(){
+      // autoresize
+      autoResizeTextarea(ac);
+
+      // se é a última linha e começou a digitar, cria outra
+      var rows = c.querySelectorAll('.grid-sln');
+      var isLast = rows.length && rows[rows.length-1] === row;
+      if (isLast && ac.value.trim().length > 0 && !ac.readOnly){
+        addSlnRow();
+      }
+    });
+  }
+  if (pr){
+    pr.addEventListener('input', function(){
+      pr.value = maskDateInput(pr.value);
+    });
+  }
+}
+
+/* ================== Fim ================== */
+</script>

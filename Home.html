@@ -1,0 +1,228 @@
+<!-- HOME -->
+<div id="view-home" class="card hidden">
+  <div class="home-header">
+    <div>
+      <h1 id="hello" style="margin-bottom:4px"></h1>
+      <div class="muted" id="helloSub">Bem-vindo ao Portal RNCs</div>
+    </div>
+    <div class="logo-wrap home-logo">
+      <img src="https://i.ibb.co/PzDD4QLk/Logo-Baldi-Vers-o-Correta-Preta.png" alt="Logo Baldi" class="logo-img logo-light home-light-logo">
+      <img class="logo-img logo-dark home-dark-logo" src="https://i.ibb.co/933KM0KH/Logo-Baldi-Vers-o-Correta-Branca.png" alt="Logo Baldi (modo escuro)">
+    </div>
+    <div class="home-actions">
+      <div class="home-actions-row">
+
+        <button class="btn-grey home-icon-btn" id="btnInstrucoes" title="Instruções" aria-label="Instruções">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 10v8"/>
+            <circle cx="12" cy="6.5" r="1" fill="currentColor" stroke="none"/>
+          </svg>
+        </button>
+
+        <button class="btn-grey theme-toggle home-icon-btn home-theme-btn" id="btnTema" data-theme-toggle="1" title="Modo claro/escuro" aria-label="Modo claro/escuro"><span class="theme-toggle-icon" aria-hidden="true">◐</span></button>
+
+        <!-- NOVO: botão Atualizar (recarrega as tabelas sem derrubar a sessão) -->
+        <button class="btn-grey home-icon-btn" id="btnAtualizar" title="Atualizar" aria-label="Atualizar">↻</button>
+
+        <button class="btn-grey home-icon-btn" id="btnSair" title="Sair" aria-label="Sair">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 3h10v18H4z"/>
+            <circle cx="8" cy="12" r="0.8" fill="currentColor" stroke="none"/>
+            <path d="M10 12h10"/>
+            <path d="M17 8l4 4-4 4"/>
+          </svg>
+        </button>
+
+
+      
+      </div>
+      <button class="btn home-icon-btn home-add-btn" id="btnCriar" title="Criar RNC" aria-label="Criar RNC">+</button>
+    </div>
+  </div>
+
+  <?!= include('HomeDashboard'); ?>
+
+
+<div id="home-blocks">
+  <!-- TABELA: Suas devoluções -->
+  <div id="block-devolucoes">
+    <div style="display:flex;justify-content:flex-start;align-items:center;margin-top:12px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="btn-grey btn-small toggle-btn" data-target="devTblWrap">▼</button>
+        <h2 class="section-title" style="margin:0">Devoluções <span id="devCount">(0)</span></h2>
+      </div>
+    </div>
+    <div class="table-wrap" id="devTblWrap">
+      <div id="devTblMsg" class="muted" style="padding:8px 0">Carregando devoluções…</div>
+      <table id="devTbl" class="hidden">
+        <thead>
+          <tr>
+            <th style="width:60px">RNC</th>
+            <th style="width:160px">Status</th>
+            <th style="width:90px">Prazo</th>
+            <th style="width:120px">Ação</th>
+            <th style="width:100px">Cliente</th>
+            <th style="width:100px">Fornecedor</th>
+            <th style="width:220px">Descrição da NC</th>
+            <th style="width:220px">Plano de ação (P.A.)</th>
+            <th style="width:100px">Resp. P.A.</th>
+            <th style="width:90px">Prazo P.A.</th>
+            <th style="width:90px">Conclusão</th>
+            <th style="width:130px">Tipo</th>
+            <th style="width:300px">Retorno</th>
+          </tr>
+        </thead>
+        <tbody id="devTblBody"></tbody>
+      </table>
+    </div>
+    <div id="logoutLoadingModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="logout-loading-dialog" role="status" aria-live="polite" aria-label="Encerrando sessão">
+        <div class="logout-spinner" aria-hidden="true"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DASHBOARD PRINCIPAL -->
+  <div id="block-pendencias">
+    <div style="display:flex;justify-content:flex-start;align-items:center;margin-top:16px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="btn-grey btn-small toggle-btn" data-target="tblWrap">▼</button>
+        <h2 class="section-title" style="margin:0">Pendências <span id="pendCount">(0)</span></h2>
+      </div>
+    </div>
+    <div class="table-wrap" id="tblWrap">
+      <div id="tblMsg" class="muted" style="padding:8px 0">Carregando RNCs…</div>
+      <table id="tbl" class="hidden">
+        <thead>
+          <tr>
+            <th style="width:60px">RNC</th>
+            <th style="width:160px">Status</th>
+            <th style="width:90px">Prazo</th>
+            <th style="width:120px">Ação</th>
+            <th style="width:100px">Cliente</th>
+            <th style="width:100px">Fornecedor</th>
+            <th style="width:220px">Descrição da NC</th>
+            <th style="width:220px">Plano de ação (P.A.)</th>
+            <th style="width:100px">Resp. P.A.</th>
+            <th style="width:90px">Prazo P.A.</th>
+            <th style="width:90px">Conclusão</th>
+            <th style="width:130px">Tipo</th>
+          </tr>
+        </thead>
+        <tbody id="tblBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- TABELA: RNCs -->
+  <div id="block-rncs">
+    <div style="display:flex;justify-content:flex-start;align-items:center;margin-top:16px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="btn-grey btn-small toggle-btn" data-target="finTblWrap">▼</button>
+        <h2 class="section-title" style="margin:0">RNCs <span id="finCount">(0)</span></h2>
+      </div>
+    </div>
+    <div class="table-wrap" id="finTblWrap">
+      <div id="finTblMsg" class="muted" style="padding:8px 0">Carregando RNCs…</div>
+      <table id="finTbl" class="hidden">
+        <thead>
+          <tr>
+            <th style="width:60px">RNC</th>
+            <th style="width:160px">Status</th>
+            <th style="width:90px">Prazo</th>
+            <th style="width:100px">Ação</th>
+            <th style="width:100px">Cliente</th>
+            <th style="width:100px">Fornecedor</th>
+            <th style="width:220px">Descrição da NC</th>
+            <th style="width:220px">Plano de ação (P.A.)</th>
+            <th style="width:100px">Resp. P.A.</th>
+            <th style="width:90px">Prazo P.A.</th>
+            <th style="width:90px">Conclusão</th>
+            <th style="width:130px">Tipo</th>
+          </tr>
+        </thead>
+        <tbody id="finTblBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+  <footer class="home-footer" aria-label="Informações do portal">
+    <span>Versão 2.6 2026 ©</span>
+    <span>Uso exclusivo da Manufatura de Estojos Baldi ®</span>
+    <span>Desenvolvido por Caio Carvalho</span>
+  </footer>
+
+   <div id="instrModal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <h3 style="margin:0">Instruções</h3>
+          <button type="button" class="btn-grey btn-small modal-close" id="closeInstr">×</button>
+        </div>
+        <div class="modal-body" id="instrContent" style="line-height:1.5">
+          <div class="muted" style="margin-bottom:12px">Guia rápido para usar o portal</div>
+
+          <div class="instrucoes-bloco">
+            <h4 style="margin:0 0 6px">1) Página inicial (painéis)</h4>
+            <ul style="margin:0 0 10px 18px; padding:0 0 0 6px; list-style: disc">
+              <li>Use <strong>Atualizar</strong> para recarregar dados sem perder a sessão; <strong>não utilize</strong> <strong>F5</strong> ou o botão do navegador.</li>
+              <li>Todos os campos são expansíveis/retráteis pela seta cinza ao lado do título.</li>
+              <li>O dashboard pode ser filtrado por data de abertura (ícone de calendário acima dos gráficos).</li>
+              <li>Supervisores veem anomalias de todos os setores sob sua responsabilidade e podem filtrar o dashboard por fornecedor.</li>
+              <li>Todas as colunas das tabelas têm filtro próprio (ícone de funil no início da coluna).</li>
+              <li>Quatro seções principais:
+                <ul style="margin:6px 0 0 18px; padding:0 0 0 6px; list-style: circle">
+                  <li><strong>Dashboard</strong>: resumo visual da situação das RNCs.</li>
+                  <li><strong>RNCs</strong>: RNCs aguardando validação da qualidade ou já finalizadas (nenhuma ação necessária).</li>
+                  <li><strong>Pendências</strong>: RNCs em andamento com alguma etapa pendente.</li>
+                  <li><strong>Devoluções</strong>: RNCs devolvidas para correção com motivo descrito.</li>
+                </ul>
+              </li>
+              <li>Se aparecer a mesma RNC mais de uma vez na página inicial, clique em Atualizar para corrigir.</li>
+            </ul>
+          </div>
+
+          <div class="instrucoes-bloco" style="margin-top:14px">
+            <h4 style="margin:0 0 6px">2) Processo de registro até a conclusão das RNC</h4>
+            <ul style="margin:0 0 10px 18px; padding:0 0 0 6px; list-style: disc">
+              <li>Clique em <strong>Criar RNC</strong> e preencha o formulário de Constatação com o máximo de informações possível.</li>
+              <li>A RNC fica visível no bloco RNCs da página inicial até a Qualidade validar a abertura ou solicitar correção.</li>
+              <li>Após a validação, o documento aparece em Pendências (para responder) ou em Devoluções (para corrigir).</li>
+              <li>A Qualidade valida tanto a resposta quanto a conclusão, podendo devolver para ajuste ou liberar para a próxima etapa.</li>
+              <li>Se a análise de causa raiz e os planos de ação já estiverem executados, preencha a Conclusão no momento da resposta para finalizar.</li>
+              <li>Se a RNC não for procedente ao setor, selecione Improcedente no momento da resposta e insira o motivo da improcedência.</li>
+            </ul>
+          </div>
+
+          <div class="instrucoes-bloco" style="margin-top:14px">
+            <h4 style="margin:0 0 6px">3) Anexos e evidências</h4>
+            <ul style="margin:0 0 10px 18px; padding:0 0 0 6px; list-style: disc">
+              <li>Sempre que possível, adicione anexos na abertura e na resposta para evidenciar a não conformidade; múltiplos arquivos são suportados.</li>
+              <li>Ao clicar em <strong>Escolher arquivos</strong>, se a janela não abrir, clique novamente até o navegador exibir o seletor de arquivos.</li>
+            </ul>
+          </div>
+
+          <div class="instrucoes-bloco" style="margin-top:14px">
+            <h4 style="margin:0 0 6px">4) Prazos</h4>
+            <ul style="margin:0 0 10px 18px; padding:0 0 0 6px; list-style: disc">
+              <li>Correção: <strong>7 dias</strong> após devolução da Qualidade.</li>
+              <li>Resposta: <strong>15 dias</strong> após validação da abertura.</li>
+              <li>Conclusão: conforme prazo definido no plano de ação.</li>
+              <li>Dicas: crie lembretes no calendário; use filtros de “prazo” ou “status” nas tabelas para priorizar.</li>
+            </ul>
+          </div>
+
+          <div class="instrucoes-bloco" style="margin-top:14px">
+            <h4 style="margin:0 0 6px">5) Portal web</h4>
+            <ul style="margin:0 0 0 18px; padding:0 0 0 6px; list-style: disc">
+              <li>Supervisores recebem e-mail semanal (segunda-feira) com o resumo das RNCs; verifique a caixa de spam se não chegar.</li>
+              <li>Para alterar usuário, senha ou e-mail, solicite à Qualidade.</li>
+              <li>Informe à Qualidade qualquer erro ou lentidão no portal.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>

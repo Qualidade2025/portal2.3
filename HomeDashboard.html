@@ -1,0 +1,912 @@
+<!-- Dashboard resumo (home) -->
+<div style="display:flex;justify-content:flex-start;align-items:center;margin-top:12px">
+  <div style="display:flex;align-items:center;gap:8px">
+    <button class="btn-grey btn-small toggle-btn" data-target="dashWrap">▼</button>
+    <h2 class="section-title" style="margin:0">Dashboard</h2>
+  </div>
+</div>
+<div class="dashboard-wrap" id="dashWrap">
+  <div id="dashContent">
+    <div class="muted">Carregando dashboard…</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  var pieChart, columnChart, fornecedorChart, paretoChart, prazoChart;
+
+  function cssVar(name, fallback){
+    var v = getComputedStyle(document.documentElement).getPropertyValue(name);
+    return (v && v.trim()) || fallback;
+  }
+
+  function getDashboardPalette(){
+    var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    return {
+      pie: isDark
+        ? ['#60a5fa','#34d399','#fbbf24','#fb7185','#94a3b8','#22d3ee','#c084fc','#a3e635']
+        : ['#2563eb','#059669','#f59e0b','#e11d48','#6b7280','#0ea5e9','#a855f7','#84cc16'],
+      openedBar: isDark ? '#60a5fa' : '#2563eb',
+      closedBar: isDark ? '#34d399' : '#059669',
+      paretoLine: isDark ? '#fb7185' : '#ef4444',
+      paretoFill: isDark ? 'rgba(251,113,133,0.2)' : 'rgba(239,68,68,0.1)',
+      fornecedorBar: isDark ? '#22d3ee' : '#0ea5e9',
+      prazo: isDark ? ['#34d399','#fb7185','#60a5fa'] : ['#22c55e', '#ef4444', '#2563eb'],
+      text: cssVar('--text', '#111827'),
+      muted: cssVar('--muted', '#6b7280'),
+      grid: isDark ? 'rgba(148,163,184,0.28)' : 'rgba(107,114,128,0.2)'
+    };
+  }
+
+
+  function parseDateInput(value){
+    if (!value) return null;
+    var d = new Date(value + 'T00:00:00');
+    return isNaN(d) ? null : d;
+  }
+
+  function isFinalizada(row){
+    var statusAbertura = String(row && row.statusAbertura || '').toLowerCase();
+    var statusControle = String(row && row.status || '').toLowerCase();
+    var statusConclusao = String(row && row.statusConclusaoPlano || '').toLowerCase();
+
+    return statusAbertura.indexOf('finaliz') !== -1 || statusControle.indexOf('finaliz') !== -1 || statusConclusao.indexOf('finaliz') !== -1;
+  }
+
+  function buildFornecedorSeries(rows){
+    var buckets = {};
+    (rows || []).forEach(function(r){
+      if (isFinalizada(r)) return;
+      var label = r && r.fornecedor ? String(r.fornecedor).trim() : '';
+      if (!label) label = 'Não informado';
+      buckets[label] = (buckets[label] || 0) + 1;
+    });
+
+    var labels = Object.keys(buckets).sort(function(a,b){
+      if (buckets[b] === buckets[a]) return a.localeCompare(b, 'pt-BR');
+      return buckets[b] - buckets[a];
+    });
+
+    return { labels: labels, data: labels.map(function(l){ return buckets[l]; }) };
+  }
+
+  function buildParetoMotivos(rows){
+    var buckets = {};
+    (rows || []).forEach(function(r){
+      var motivo = r && r.descNC ? String(r.descNC).trim() : '';
+      if (!motivo) motivo = 'Não informado';
+      buckets[motivo] = (buckets[motivo] || 0) + 1;
+    });
+
+    var entries = Object.keys(buckets).map(function(label){
+      return { label: label, count: buckets[label] };
+    }).sort(function(a,b){
+      if (b.count === a.count) return a.label.localeCompare(b.label, 'pt-BR');
+      return b.count - a.count;
+    });
+
+    var total = entries.reduce(function(sum, e){ return sum + e.count; }, 0) || 1;
+    var cumulative = 0;
+
+    return entries.reduce(function(acc, entry){
+      cumulative += entry.count;
+      acc.labels.push(entry.label);
+      acc.counts.push(entry.count);
+      acc.cumulative.push(Math.round((cumulative / total) * 100));
+      return acc;
+    }, { labels: [], counts: [], cumulative: [] });
+  }
+
+  function isAguardandoValidacao(row){
+    var statusAbertura = String(row && row.statusAbertura || '').toLowerCase();
+    var statusResposta = String(row && row.statusResposta || '').toLowerCase();
+    var statusConclusao = String(row && row.statusConclusaoPlano || '').toLowerCase();
+    var aguardando = 'aguardando validação';
+
+    return statusAbertura.indexOf(aguardando) !== -1 ||
+      statusResposta.indexOf(aguardando) !== -1 ||
+      statusConclusao.indexOf(aguardando) !== -1
+  }
+
+  function ensureChartJs(callback){
+    if (window.Chart) return callback();
+    if (document.getElementById('chartjs-script')){
+      document.getElementById('chartjs-script').addEventListener('load', callback, { once: true });
+      return;
+    }
+    var s = document.createElement('script');
+    s.id = 'chartjs-script';
+    s.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+    s.async = true;
+    s.onload = callback;
+    s.onerror = function(){
+      console.error('Falha ao carregar Chart.js');
+    };
+    document.head.appendChild(s);
+  }
+
+  function formatDateISOToBR(iso){
+    var d = parseDateInput(iso);
+    return d ? d.toLocaleDateString('pt-BR') : '';
+  }
+
+  function parseDateBRtoDate(str){
+    if (!str) return null;
+    var m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(str).trim());
+    if (!m) return null;
+    var d = new Date(parseInt(m[3],10), parseInt(m[2],10)-1, parseInt(m[1],10));
+    return isNaN(d) ? null : d;
+  }
+
+  function getUserAreasLower(){
+    var areas = (PROFILE && Array.isArray(PROFILE.areas) && PROFILE.areas.length)
+      ? PROFILE.areas
+      : (PROFILE && PROFILE.area ? [PROFILE.area] : []);
+    return areas.map(function(a){ return String(a || '').toLowerCase().trim(); }).filter(Boolean);
+  }
+
+  function isSupervisorUser(){
+    return Boolean(PROFILE && PROFILE.supervisor);
+  }
+
+  function canUseFornecedorFilter(){
+    if (typeof isUserQualidade === 'function' && isUserQualidade()) return true;
+    var areas = getUserAreasLower();
+    return areas.length > 1;
+  }
+
+  function getFornecedorFilterValues(){
+    var input = document.getElementById('dashFilterFornecedor');
+    if (!input) return [];
+    try {
+      var parsed = JSON.parse(input.value || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e){
+      return [];
+    }
+  }
+
+  function setFornecedorFilterValues(values){
+    var input = document.getElementById('dashFilterFornecedor');
+    if (!input) return;
+    var arr = Array.isArray(values) ? values.filter(Boolean) : [];
+    input.value = JSON.stringify(arr);
+  }
+
+  function filterRowsByFornecedor(rows, selectedFornecedores){
+    var areasLower = getUserAreasLower();
+    var selectedList = Array.isArray(selectedFornecedores) ? selectedFornecedores : [];
+    var selectedLower = selectedList.map(function(val){ return String(val || '').toLowerCase().trim(); }).filter(Boolean);
+    var hasSelection = selectedLower.length > 0;
+    var isQualidade = typeof isUserQualidade === 'function' && isUserQualidade();
+
+    return (rows || []).filter(function(r){
+      var forn = r && r.fornecedor ? String(r.fornecedor).toLowerCase().trim() : '';
+      if (!forn) return false;
+
+      // Qualidade pode visualizar tudo, aplicando o filtro apenas se selecionado
+      if (isQualidade) return hasSelection ? selectedLower.indexOf(forn) !== -1 : true;
+
+      // Demais perfis (incluindo supervisores) ficam restritos às suas áreas
+      if (areasLower.indexOf(forn) === -1) return false;
+      if (hasSelection) return selectedLower.indexOf(forn) !== -1;
+      return true;
+    });
+  }
+
+  function getFornecedorOptions(){
+    var permitted = filterRowsByFornecedor((LAST_DEV_ROWS||[]).concat(LAST_PEND_ROWS||[], LAST_RNC_ROWS||[]), []);
+    var seen = {};
+    permitted.forEach(function(r){
+      var label = r && r.fornecedor ? String(r.fornecedor).trim() : '';
+      if (!label) return;
+      seen[label] = label;
+    });
+    return Object.keys(seen).sort(function(a,b){ return a.localeCompare(b, 'pt-BR'); });
+  }
+
+  function buildUniqueRows(selectedFornecedores){
+    var all = filterRowsByFornecedor((LAST_DEV_ROWS||[]).concat(LAST_PEND_ROWS||[], LAST_RNC_ROWS||[]), selectedFornecedores);
+    var seen = {};
+    var list = [];
+    all.forEach(function(r){
+      var key = (r && r.rnc) ? String(r.rnc).trim() : '';
+      if (!key || seen[key]) return;
+      seen[key] = true;
+      list.push(r);
+    });
+    return list;
+  }
+
+  function getStatusBuckets(rows){
+    var buckets = {};
+    rows.forEach(function(r){
+      var label = (r && r.statusAbertura) ? String(r.statusAbertura).trim() : (r && r.status ? String(r.status).trim() : 'Não informado');
+      if (!label) label = 'Não informado';
+      buckets[label] = (buckets[label] || 0) + 1;
+    });
+    return buckets;
+  }
+
+  function buildKpiData(rows){
+    var statusBuckets = getStatusBuckets(rows);
+
+    var concluidasPorStatus = (statusBuckets['Conclusão'] || statusBuckets['Conclusao'] || 0) + (statusBuckets['Finalizado'] || 0);
+
+    var totals = {
+      total: rows.length,
+      concluidas: concluidasPorStatus,
+      abertas: 0,
+      atrasadas: 0,
+      noPrazo: 0
+    };
+
+    (rows || []).forEach(function(r){
+            if (isAguardandoValidacao(r)) return;
+
+      var cor = r && r.cor ? String(r.cor).toLowerCase().trim() : '';
+
+      if (cor === 'verde') totals.noPrazo += 1;
+      if (cor === 'vermelho') totals.atrasadas += 1;
+    });
+
+    totals.abertas = Math.max(0, totals.total - totals.concluidas);
+    return totals;
+  }
+
+  function buildMonthlySeries(rows){
+    var now = new Date();
+    var months = [];
+    for (var i=5; i>=0; i--){
+      var d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+      months.push({ key: d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'), label: d.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '') + '/' + String(d.getFullYear()).slice(-2) });
+    }
+
+    var abertas = {}, concluidas = {};
+    months.forEach(function(m){ abertas[m.key] = 0; concluidas[m.key] = 0; });
+
+    rows.forEach(function(r){
+      var ab = parseDateBRtoDate(r.data);
+      if (ab){
+        var k = ab.getFullYear() + '-' + String(ab.getMonth()+1).padStart(2,'0');
+        if (k in abertas) abertas[k] += 1;
+      }
+
+      var statusLabel = (r && r.statusAbertura) ? String(r.statusAbertura).trim().toLowerCase() : (r && r.status ? String(r.status).trim().toLowerCase() : '');
+      var isConcluida = statusLabel === 'conclusão' || statusLabel === 'conclusao' || statusLabel === 'finalizado';
+      var co = parseDateBRtoDate(r.conclusao) || ab;
+
+      if (isConcluida && co){
+        var kc = co.getFullYear() + '-' + String(co.getMonth()+1).padStart(2,'0');
+        if (kc in concluidas) concluidas[kc] += 1;
+      }
+    });
+
+    var labels = months.map(function(m){ return m.label; });
+    var abertasData = months.map(function(m){ return abertas[m.key]; });
+    var concluidasData = months.map(function(m){ return concluidas[m.key]; });
+
+    return { labels: labels, abertas: abertasData, concluidas: concluidasData };
+  }
+
+  function buildDeltaLabel(values){
+    if (!Array.isArray(values) || values.length < 2) return '';
+    var last = values[values.length-1];
+    var prev = values[values.length-2];
+    var diff = last - prev;
+    if (!diff) return 'estável vs. mês anterior';
+    var prefix = diff > 0 ? '+' : '';
+    return prefix + diff + ' vs. mês anterior';
+  }
+
+  function getDateFilters(){
+    var startInput = document.getElementById('dashFilterStart');
+    var endInput = document.getElementById('dashFilterEnd');
+
+    var startValue = startInput ? startInput.value : '';
+    var endValue = endInput ? endInput.value : '';
+
+    return {
+      startValue: startValue,
+      endValue: endValue,
+      startDate: parseDateInput(startValue),
+      endDate: parseDateInput(endValue)
+    };
+  }
+
+  function ensureDashboardDateOverlay(){
+    if (window._dashDateOverlay) return window._dashDateOverlay;
+
+    var root = document.createElement('div');
+    root.className = 'filter-overlay hidden';
+
+    var backdrop = document.createElement('div');
+    backdrop.className = 'filter-backdrop';
+    root.appendChild(backdrop);
+
+    var dialog = document.createElement('div');
+    dialog.className = 'filter-dialog';
+
+    var header = document.createElement('div');
+    header.className = 'filter-header';
+    var title = document.createElement('h3');
+    title.className = 'filter-title';
+    title.textContent = 'Filtrar por período';
+    var closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'btn-grey btn-small filter-close';
+    closeBtn.textContent = '×';
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+    dialog.appendChild(header);
+
+    var body = document.createElement('div');
+    body.className = 'filter-body';
+    var hint = document.createElement('div');
+    hint.className = 'muted';
+    hint.textContent = 'Selecione o intervalo de datas de abertura a aplicar em todo o dashboard.';
+    body.appendChild(hint);
+
+    var startLabel = document.createElement('label');
+    startLabel.textContent = 'Data inicial';
+    var startInput = document.createElement('input');
+    startInput.type = 'date';
+    startInput.id = 'dashDateOverlayStart';
+    body.appendChild(startLabel);
+    body.appendChild(startInput);
+
+    var endLabel = document.createElement('label');
+    endLabel.textContent = 'Data final';
+    var endInput = document.createElement('input');
+    endInput.type = 'date';
+    endInput.id = 'dashDateOverlayEnd';
+    body.appendChild(endLabel);
+    body.appendChild(endInput);
+
+    dialog.appendChild(body);
+
+    var actions = document.createElement('div');
+    actions.className = 'filter-actions';
+    var applyBtn = document.createElement('button');
+    applyBtn.type = 'button';
+    applyBtn.className = 'btn';
+    applyBtn.textContent = 'Aplicar período';
+    var clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.className = 'btn-grey';
+    clearBtn.textContent = 'Limpar';
+    actions.appendChild(clearBtn);
+    actions.appendChild(applyBtn);
+    dialog.appendChild(actions);
+
+    root.appendChild(dialog);
+    document.body.appendChild(root);
+
+    var overlay = {
+      root: root,
+      backdrop: backdrop,
+      startInput: startInput,
+      endInput: endInput,
+      applyBtn: applyBtn,
+      clearBtn: clearBtn
+    };
+
+    function close(){ root.classList.add('hidden'); }
+    function handleClose(){ close(); }
+
+    closeBtn.addEventListener('click', handleClose);
+    backdrop.addEventListener('click', handleClose);
+    root.addEventListener('keydown', function(e){ if (e.key === 'Escape') close(); });
+
+    window._dashDateOverlay = overlay;
+    return overlay;
+  }
+
+  function openDashboardDateOverlay(currentFilters, onApply){
+    var overlay = ensureDashboardDateOverlay();
+    overlay.startInput.value = currentFilters && currentFilters.startValue ? currentFilters.startValue : '';
+    overlay.endInput.value = currentFilters && currentFilters.endValue ? currentFilters.endValue : '';
+    overlay.root.classList.remove('hidden');
+    overlay.applyBtn.onclick = function(){
+      if (typeof onApply === 'function'){
+        onApply({
+          startValue: overlay.startInput.value,
+          endValue: overlay.endInput.value
+        });
+      }
+      overlay.root.classList.add('hidden');
+    };
+    overlay.clearBtn.onclick = function(){
+      overlay.startInput.value = '';
+      overlay.endInput.value = '';
+      if (typeof onApply === 'function'){
+        onApply({ startValue: '', endValue: '' });
+      }
+      overlay.root.classList.add('hidden');
+    };
+  }
+
+  var fornecedorFilterOverlay;
+
+  function ensureFornecedorFilterOverlay(){
+    if (fornecedorFilterOverlay) return fornecedorFilterOverlay;
+
+    var root = document.createElement('div');
+    root.className = 'filter-overlay hidden';
+    var backdrop = document.createElement('div');
+    backdrop.className = 'filter-backdrop';
+    var dialog = document.createElement('div');
+    dialog.className = 'filter-dialog';
+
+    var header = document.createElement('div');
+    header.className = 'filter-header';
+    var title = document.createElement('h3');
+    title.className = 'filter-title';
+    title.textContent = 'Fornecedor';
+    var closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'filter-btn filter-btn-clear filter-close';
+    closeBtn.textContent = '×';
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+
+    var body = document.createElement('div');
+    body.className = 'filter-body';
+
+    var selectAllWrap = document.createElement('label');
+    selectAllWrap.className = 'filter-option';
+    var selectAll = document.createElement('input');
+    selectAll.type = 'checkbox';
+    selectAll.checked = true;
+    var selectAllLabel = document.createElement('span');
+    selectAllLabel.className = 'filter-option-label';
+    selectAllLabel.textContent = 'Selecionar todos';
+    selectAllWrap.appendChild(selectAll);
+    selectAllWrap.appendChild(selectAllLabel);
+
+    var optionsWrap = document.createElement('div');
+    optionsWrap.className = 'filter-options';
+
+    body.appendChild(selectAllWrap);
+    body.appendChild(optionsWrap);
+
+    var actions = document.createElement('div');
+    actions.className = 'filter-actions';
+    var clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.className = 'btn-grey';
+    clearBtn.textContent = 'Limpar';
+    var applyBtn = document.createElement('button');
+    applyBtn.type = 'button';
+    applyBtn.className = 'btn';
+    applyBtn.textContent = 'Aplicar';
+    actions.appendChild(clearBtn);
+    actions.appendChild(applyBtn);
+
+    dialog.appendChild(header);
+    dialog.appendChild(body);
+    dialog.appendChild(actions);
+    root.appendChild(backdrop);
+    root.appendChild(dialog);
+    document.body.appendChild(root);
+
+    function close(){ root.classList.add('hidden'); }
+    closeBtn.addEventListener('click', close);
+    backdrop.addEventListener('click', close);
+    root.addEventListener('keydown', function(e){ if (e.key === 'Escape') close(); });
+
+    fornecedorFilterOverlay = {
+      root: root,
+      optionsWrap: optionsWrap,
+      selectAll: selectAll,
+      applyBtn: applyBtn,
+      clearBtn: clearBtn
+    };
+
+    return fornecedorFilterOverlay;
+  }
+
+  function openFornecedorFilterOverlay(options, selectedValues, onApply){
+    var overlay = ensureFornecedorFilterOverlay();
+    var selectedSet = new Set(Array.isArray(selectedValues) ? selectedValues : []);
+    overlay.optionsWrap.innerHTML = '';
+
+    var selectAll = overlay.selectAll;
+    var optionCheckboxes = [];
+
+    options.forEach(function(opt){
+      var label = document.createElement('label');
+      label.className = 'filter-option';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = opt;
+      cb.checked = !selectedSet.size || selectedSet.has(opt);
+      var span = document.createElement('span');
+      span.className = 'filter-option-label';
+      span.textContent = opt || '(Vazio)';
+      label.appendChild(cb);
+      label.appendChild(span);
+      overlay.optionsWrap.appendChild(label);
+      optionCheckboxes.push(cb);
+    });
+
+    function syncSelectAll(){
+      var allChecked = optionCheckboxes.every(function(cb){ return cb.checked; });
+      selectAll.checked = allChecked;
+    }
+
+    syncSelectAll();
+
+    selectAll.onchange = function(){
+      var checked = selectAll.checked;
+      optionCheckboxes.forEach(function(cb){ cb.checked = checked; });
+    };
+
+    optionCheckboxes.forEach(function(cb){
+      cb.onchange = function(){
+        syncSelectAll();
+      };
+    });
+
+    if (overlay.clearBtn){
+      overlay.clearBtn.onclick = function(){
+        optionCheckboxes.forEach(function(cb){ cb.checked = false; });
+        selectAll.checked = false;
+        if (typeof onApply === 'function') onApply([]);
+        overlay.root.classList.add('hidden');
+      };
+    }
+
+    overlay.applyBtn.onclick = function(){
+      var values = optionCheckboxes
+        .filter(function(cb){ return cb.checked; })
+        .map(function(cb){ return cb.value; });
+
+      if (values.length === options.length || values.length === 0){
+        values = [];
+        optionCheckboxes.forEach(function(cb){ cb.checked = true; });
+        selectAll.checked = true;
+      }
+
+      overlay.root.classList.add('hidden');
+      if (typeof onApply === 'function') onApply(values);
+    };
+
+    overlay.root.classList.remove('hidden');
+  }
+
+  function filterRowsByAbertura(rows, filters){
+    if (!filters || (!filters.startDate && !filters.endDate)) return rows;
+    var endOfDay = filters.endDate ? new Date(filters.endDate.getTime()) : null;
+    if (endOfDay) endOfDay.setHours(23,59,59,999);
+
+    return (rows || []).filter(function(r){
+      var abertura = r && r.data ? parseDateBRtoDate(r.data) : null;
+      if (!abertura) return false;
+      if (filters.startDate && abertura < filters.startDate) return false;
+      if (endOfDay && abertura > endOfDay) return false;
+      return true;
+    });
+  }
+
+  function renderHomeDashboard(){
+    var root = document.getElementById('dashContent');
+    if (!root) return;
+    var filters = getDateFilters();
+    var showFornecedorFilter = canUseFornecedorFilter();
+    var fornecedorValues = showFornecedorFilter ? getFornecedorFilterValues() : [];
+    var fornecedorOptions = showFornecedorFilter ? getFornecedorOptions() : [];
+
+    var hasDateFilter = Boolean(filters.startValue || filters.endValue);
+    var rangeLabel = hasDateFilter
+      ? 'Período: ' + (filters.startValue ? formatDateISOToBR(filters.startValue) : 'início') + ' → ' + (filters.endValue ? formatDateISOToBR(filters.endValue) : 'hoje')
+      : 'Nenhum período selecionado';
+    var fornecedorLabel = fornecedorValues.length ? ('Fornecedor: ' + fornecedorValues.join(', ')) : 'Todos os fornecedores';
+    var fornecedorFilterActive = fornecedorValues.length > 0;
+
+    var fornecedorFilterHtml = '';
+    if (showFornecedorFilter){
+      fornecedorFilterHtml = '' +
+        '<div class="filter-btn-group" aria-label="Filtro de fornecedor">' +
+          '<button type="button" id="dashFornecedorFilterBtn" class="filter-btn '+ (fornecedorFilterActive ? 'filter-btn-active' : 'filter-btn-inactive') +'" title="Filtrar fornecedor">' +
+            '<span class="filter-icon" aria-hidden="true"></span><span>Fornecedor</span>' +
+          '</button>' +
+          '<button type="button" id="dashFornecedorFilterClear" class="filter-btn filter-btn-clear '+ (fornecedorFilterActive ? 'filter-btn-active' : 'filter-btn-inactive') +'" title="Limpar filtro">×</button>' +
+        '</div>';
+    }
+
+    var filterCard = '' +
+      '<div class="card dashboard-filter-card" style="margin:0 0 12px 0">' +
+        '<div class="dashboard-filter" style="flex-direction:row;align-items:center;gap:12px;justify-content:flex-start">' +
+          '<div class="filter-btn-group" aria-label="Filtros do dashboard">' +
+            '<button type="button" id="dashDateFilterBtn" class="filter-btn '+ (hasDateFilter ? 'filter-btn-active' : 'filter-btn-inactive') +'" title="Filtrar período">' +
+              '<span class="calendar-icon" aria-hidden="true"></span><span class="sr-only">Filtrar período</span>' +
+            '</button>' +
+            '<button type="button" id="dashDateFilterClear" class="filter-btn filter-btn-clear '+ (hasDateFilter ? 'filter-btn-active' : 'filter-btn-inactive') +'" title="Limpar filtro">×</button>' +
+          '</div>' +
+          '<div class="muted" style="font-size:12px">'+ rangeLabel +'</div>' +
+          (showFornecedorFilter ? fornecedorFilterHtml : '') +
+          (showFornecedorFilter ? '<div class="muted" style="font-size:12px">'+ fornecedorLabel +'</div>' : '') +
+        '</div>' +
+        '<input type="hidden" id="dashFilterStart" value="'+ (filters.startValue || '') +'">' +
+        '<input type="hidden" id="dashFilterEnd" value="'+ (filters.endValue || '') +'">' +
+        (showFornecedorFilter ? '<input type="hidden" id="dashFilterFornecedor" value="'+ esc(JSON.stringify(fornecedorValues || [])) +'">' : '') +
+      '</div>';
+
+    var rows = filterRowsByAbertura(buildUniqueRows(fornecedorValues), filters);
+    root.innerHTML = filterCard;
+
+    var startEl = document.getElementById('dashFilterStart');
+    var endEl = document.getElementById('dashFilterEnd');
+    var openBtn = document.getElementById('dashDateFilterBtn');
+    var clearBtn = document.getElementById('dashDateFilterClear');
+    var fornecedorBtn = document.getElementById('dashFornecedorFilterBtn');
+    var fornecedorClearBtn = document.getElementById('dashFornecedorFilterClear');
+
+    if (openBtn) openBtn.addEventListener('click', function(){
+      openDashboardDateOverlay(filters, function(payload){
+        if (startEl) startEl.value = payload.startValue || '';
+        if (endEl) endEl.value = payload.endValue || '';
+        renderHomeDashboard();
+      });
+    });
+
+    if (clearBtn) clearBtn.addEventListener('click', function(){
+      if (startEl) startEl.value = '';
+      if (endEl) endEl.value = '';
+      renderHomeDashboard();
+    });
+
+    if (fornecedorBtn) fornecedorBtn.addEventListener('click', function(){
+      openFornecedorFilterOverlay(fornecedorOptions, fornecedorValues, function(selected){
+        setFornecedorFilterValues(selected);
+        renderHomeDashboard();
+      });
+    });
+
+    if (fornecedorClearBtn) fornecedorClearBtn.addEventListener('click', function(){
+      setFornecedorFilterValues([]);
+      renderHomeDashboard();
+    });
+
+    if (!rows.length){
+      root.insertAdjacentHTML('beforeend', '<div class="muted">Nenhum dado disponível para o dashboard.</div>');
+      return;
+    }
+
+    var statusBuckets = getStatusBuckets(rows);
+    var kpis = buildKpiData(rows);
+    var monthly = buildMonthlySeries(rows);
+    var isQualidade = typeof isUserQualidade === 'function' && isUserQualidade();
+    var fornecedorSeries = isQualidade ? buildFornecedorSeries(rows) : null;
+    var paretoSeries = buildParetoMotivos(rows);
+    var prazoSeries = isQualidade ? {
+      noPrazo: kpis.noPrazo,
+      atrasadas: kpis.atrasadas,
+      concluidas: kpis.concluidas
+    } : null;
+
+    var chartsHtml = '';
+    if (isQualidade){
+      chartsHtml = '' +
+        '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px">' +
+          '<div class="card" style="margin:0;flex:1 1 320px">' +
+            '<h3 style="margin-top:0;margin-bottom:8px">Situação</h3>' +
+            '<canvas id="prazoPie" class="chart-canvas" height="220"></canvas>' +
+          '</div>' +
+          '<div class="card" style="margin:0;flex:1 1 320px">' +
+            '<h3 style="margin-top:0;margin-bottom:8px">Etapa</h3>' +
+            '<canvas id="statusPie" class="chart-canvas" height="220"></canvas>' +
+          '</div>' +
+        '</div>' +
+        '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px">' +
+          '<div class="card" style="margin:0;flex:1 1 320px">' +
+            '<h3 style="margin-top:0;margin-bottom:8px">RNCs pendentes por setor fornecedor</h3>' +
+            '<canvas id="fornecedorBars" class="chart-canvas" height="260"></canvas>' +
+          '</div>' +
+          '<div class="card" style="margin:0;flex:1 1 320px">' +
+            '<h3 style="margin-top:0;margin-bottom:8px">Aberturas x conclusões (últimos 6 meses)</h3>' +
+            '<canvas id="monthBars" class="chart-canvas" height="220"></canvas>' +
+          '</div>' +
+        '</div>' +
+        '<div class="card" style="margin:12px 0 0 0">' +
+          '<h3 style="margin-top:0;margin-bottom:8px">Pareto de motivos</h3>' +
+          '<canvas id="motivosPareto" class="chart-canvas" height="260"></canvas>' +
+        '</div>';
+    } else {
+      chartsHtml = '' +
+        '<div style="display:flex;gap:12px;flex-wrap:wrap">' +
+          '<div class="card" style="margin:0;flex:1 1 320px">' +
+            '<h3 style="margin-top:0;margin-bottom:8px">Etapa</h3>' +
+            '<canvas id="statusPie" class="chart-canvas" height="220"></canvas>' +
+          '</div>' +
+          '<div class="card" style="margin:0;flex:1 1 320px">' +
+            '<h3 style="margin-top:0;margin-bottom:8px">Aberturas x conclusões (últimos 6 meses)</h3>' +
+            '<canvas id="monthBars" class="chart-canvas" height="220"></canvas>' +
+          '</div>' +
+        '</div>' +
+        '<div class="card" style="margin:12px 0 0 0">' +
+          '<h3 style="margin-top:0;margin-bottom:8px">Pareto de motivos</h3>' +
+          '<canvas id="motivosPareto" class="chart-canvas" height="260"></canvas>' +
+        '</div>';
+    }
+
+    root.insertAdjacentHTML('beforeend',
+      '<div class="kpi-grid kpi-row" style="grid-template-columns:repeat(4,minmax(180px,1fr));margin-bottom:10px">' +
+        '<div class="kpi-card">' +
+          '<div class="kpi-label">Total de RNCs</div>' +
+          '<div class="kpi-value">'+ kpis.total +'</div>' +
+          '<div class="kpi-sub">'+ buildDeltaLabel(monthly.abertas) +'</div>' +
+        '</div>' +
+        '<div class="kpi-card">' +
+          '<div class="kpi-label">Concluídas</div>' +
+          '<div class="kpi-value">'+ kpis.concluidas +'</div>' +
+          '<div class="kpi-sub">'+ buildDeltaLabel(monthly.concluidas) +'</div>' +
+        '</div>' +
+        '<div class="kpi-card">' +
+          '<div class="kpi-label">No prazo</div>' +
+          '<div class="kpi-value good">'+ kpis.noPrazo +'</div>' +
+          '<div class="kpi-sub"></div>' +
+        '</div>' +
+        '<div class="kpi-card">' +
+          '<div class="kpi-label">Atrasadas</div>' +
+          '<div class="kpi-value bad">'+ kpis.atrasadas +'</div>' +
+          '<div class="kpi-sub"></div>' +
+        '</div>' +
+      '</div>' +
+      chartsHtml
+    );
+
+    ensureChartJs(function(){
+      var palette = getDashboardPalette();
+      var pieCtx = document.getElementById('statusPie');
+      var barCtx = document.getElementById('monthBars');
+
+      if (pieChart) pieChart.destroy();
+      if (columnChart) columnChart.destroy();
+      if (fornecedorChart) fornecedorChart.destroy();
+      if (paretoChart) paretoChart.destroy();
+      if (prazoChart) prazoChart.destroy();
+
+      var pieLabels = Object.keys(statusBuckets);
+      var pieData = Object.values(statusBuckets);
+
+      pieChart = new Chart(pieCtx, {
+        type: 'pie',
+        data: {
+          labels: pieLabels,
+          datasets: [{
+            data: pieData,
+           backgroundColor: palette.pie
+          }]
+        },
+        options: {
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom', labels: { color: palette.text } }
+          }
+        }
+      });
+
+      columnChart = new Chart(barCtx, {
+        type: 'bar',
+        data: {
+          labels: monthly.labels,
+          datasets: [
+            { label: 'Abertas', data: monthly.abertas, backgroundColor: palette.openedBar },
+            { label: 'Concluídas', data: monthly.concluidas, backgroundColor: palette.closedBar }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: { y: { beginAtZero: true, precision: 0, ticks: { color: palette.muted }, grid: { color: palette.grid } }, x: { ticks: { color: palette.muted }, grid: { color: palette.grid } } },
+          plugins: { legend: { position: 'bottom', labels: { color: palette.text } } }
+        }
+      });
+
+      var paretoCtx = document.getElementById('motivosPareto');
+
+      if (paretoCtx && paretoSeries){
+        paretoChart = new Chart(paretoCtx, {
+          data: {
+            labels: paretoSeries.labels,
+            datasets: [
+              {
+                type: 'bar',
+                label: 'Ocorrências',
+                data: paretoSeries.counts,
+                backgroundColor: palette.openedBar,
+                yAxisID: 'y'
+              },
+              {
+                type: 'line',
+                label: 'Cumulativo (%)',
+                data: paretoSeries.cumulative,
+                borderColor: palette.paretoLine,
+                backgroundColor: palette.paretoFill,
+                yAxisID: 'y1',
+                tension: 0.2
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              y: { beginAtZero: true, ticks: { precision: 0, color: palette.muted }, grid: { color: palette.grid } },
+              y1: {
+                position: 'right',
+                beginAtZero: true,
+                max: 100,
+                grid: { drawOnChartArea: false, color: palette.grid },
+                ticks: {
+                  color: palette.muted,
+                  callback: function(value){ return value + '%'; }
+                }
+              }
+            },
+            plugins: {
+              legend: { position: 'bottom', labels: { color: palette.text } },
+              tooltip: {
+                callbacks: {
+                  label: function(context){
+                    if (context.datasetIndex === 1) return 'Cumulativo: ' + context.parsed.y + '%';
+                    return 'Quantidade: ' + context.parsed.y;
+                  }
+                }
+              }
+            }
+          }
+        });
+      }
+
+      if (isQualidade){
+        var fornecedorCtx = document.getElementById('fornecedorBars');
+        var prazoCtx = document.getElementById('prazoPie');
+
+        if (fornecedorCtx && fornecedorSeries){
+          fornecedorChart = new Chart(fornecedorCtx, {
+            type: 'bar',
+            data: {
+              labels: fornecedorSeries.labels,
+              datasets: [{
+                label: 'RNCs pendentes',
+                data: fornecedorSeries.data,
+                backgroundColor: palette.fornecedorBar
+              }]
+            },
+            options: {
+              indexAxis: 'y',
+              responsive: true,
+              maintainAspectRatio: false,
+              scales: { x: { beginAtZero: true, precision: 0, ticks: { color: palette.muted }, grid: { color: palette.grid } }, y: { ticks: { color: palette.muted }, grid: { color: palette.grid } } },
+              plugins: { legend: { display: false } }
+            }
+          });
+        }
+
+        if (prazoCtx && prazoSeries){
+          prazoChart = new Chart(prazoCtx, {
+            type: 'pie',
+            data: {
+              labels: ['No prazo', 'Atrasadas', 'Concluídas'],
+              datasets: [{
+                data: [prazoSeries.noPrazo, prazoSeries.atrasadas, prazoSeries.concluidas],
+                backgroundColor: palette.prazo
+              }]
+            },
+            options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: palette.text } } } }
+          });
+        }
+      }
+    });
+  }
+
+  document.addEventListener('portal-theme-change', function(){
+    if (typeof renderHomeDashboard === 'function') renderHomeDashboard();
+  });
+
+  window.renderHomeDashboard = renderHomeDashboard;
+})();
+</script>
